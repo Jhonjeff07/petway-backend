@@ -5,7 +5,8 @@ const {
     obtenerMascotas,
     obtenerMascotaPorId,
     actualizarMascota,
-    eliminarMascota
+    eliminarMascota,
+    cambiarEstadoMascota
 } = require('../controllers/mascotaController');
 const verificarToken = require('../middleware/authMiddleware');
 const upload = require('../middleware/upload');
@@ -38,6 +39,11 @@ router.get('/:id', obtenerMascotaPorId);
 // 🔹 Actualizar mascota (protegido)
 // =============================
 router.put('/:id', verificarToken, actualizarMascota);
+
+// =============================
+// 🔹 Cambiar estado de mascota (protegido)
+// =============================
+router.patch('/:id/estado', verificarToken, cambiarEstadoMascota); // 🔹 Nueva ruta
 
 // =============================
 // 🔹 Eliminar mascota (protegido)

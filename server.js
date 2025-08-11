@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const cookieParser = require('cookie-parser'); // 🔹 Nuevo
 const connectDB = require('./config/db');
 
 dotenv.config();
@@ -9,14 +10,17 @@ connectDB();
 const app = express();
 
 app.use(cors({
-    origin: 'http://localhost:5173', // Reemplaza con el puerto de tu frontend
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    credentials: true
 }));
 
-app.use(express.json());
+app.options('*', cors());
 
-// 🔥 Servir la carpeta 'uploads' de forma pública
+// Middlewares
+app.use(express.json());
+app.use(cookieParser()); // 🔹 Debe ir aquí
 app.use('/uploads', express.static('uploads'));
 
 // Rutas

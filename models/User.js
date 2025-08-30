@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
 
 const UsuarioSchema = new mongoose.Schema({
     nombre: {
@@ -22,28 +21,23 @@ const UsuarioSchema = new mongoose.Schema({
         minlength: [8, 'La contraseña debe tener al menos 8 caracteres'],
         select: false
     },
+    preguntaSecreta: {
+        type: String,
+        required: [true, 'La pregunta secreta es obligatoria'],
+        trim: true
+    },
+    respuestaSecreta: {
+        type: String,
+        required: [true, 'La respuesta secreta es obligatoria'],
+        select: false
+    },
     createdAt: {
         type: Date,
         default: Date.now
     }
 });
 
-// Middleware para hashear la contraseña antes de guardar
-UsuarioSchema.pre('save', async function (next) {
-    if (!this.isModified('password')) return next();
-
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (error) {
-        next(error);
-    }
-});
-
-// Método para comparar contraseñas
-UsuarioSchema.methods.comparePassword = async function (candidatePassword) {
-    return await bcrypt.compare(candidatePassword, this.password);
-};
+// NOTA: Hemos eliminado completamente el middleware pre-save
+// Todo el hashing se manejará manualmente en los controladores
 
 module.exports = mongoose.model('User', UsuarioSchema);

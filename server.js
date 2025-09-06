@@ -9,11 +9,13 @@ connectDB();
 
 const app = express();
 
+// En server.js de tu backend
 app.use(cors({
-    origin: 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true // permite cookies
+    origin: [
+        'https://petway-frontend.onrender.com', // tu nuevo frontend
+        'http://localhost:3000' // para desarrollo local
+    ],
+    credentials: true
 }));
 
 // Opciones preflight para todas las rutas

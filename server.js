@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const cookieParser = require('cookie-parser'); // <<--- imprescindible
+const cookieParser = require('cookie-parser');
 const connectDB = require('./config/db');
 
 dotenv.config();
@@ -9,21 +9,33 @@ connectDB();
 
 const app = express();
 
-// En server.js de tu backend
-app.use(cors({
-    origin: [
-        'https://petway-frontend.onrender.com', // tu nuevo frontend
-        'http://localhost:3000' // para desarrollo local
-    ],
-    credentials: true
-}));
+// Configuración MEJORADA de CORS
+const corsOptions = {
+    origin: function (origin, callback) {
+        const allowedOrigins = [
+            'https://petway-frontend.onrender.com',
+            'http://localhost:3000',
+            'http://localhost:5173' // Puerto común de Vite
+        ];
 
-// Opciones preflight para todas las rutas
-app.options('*', cors());
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// Middleware para manejar preflight requests
+app.options('*', cors(corsOptions));
 
 /* Middlewares */
 app.use(express.json());
-app.use(cookieParser());      // <<--- debe ir antes de las rutas para que req.cookies exista
+app.use(cookieParser());
 app.use('/uploads', express.static('uploads'));
 
 /* Rutas */

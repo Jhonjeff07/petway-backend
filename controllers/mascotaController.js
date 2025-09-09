@@ -14,10 +14,10 @@ const sanitizeInput = (value) => {
 // Crear mascota
 exports.crearMascota = async (req, res) => {
     try {
-        const { nombre, tipo, raza, edad, descripcion, ciudad } = req.body;
-        const fotoUrl = req.file
-            ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
-            : '';
+        const { nombre, tipo, raza, edad, descripcion, ciudad, telefono } = req.body;
+
+        // Guardar solo el path relativo en lugar de la URL completa
+        const fotoUrl = req.file ? `/uploads/${req.file.filename}` : '';
 
         const mascota = new Mascota({
             nombre: sanitizeInput(nombre),
@@ -26,6 +26,7 @@ exports.crearMascota = async (req, res) => {
             edad,
             descripcion: sanitizeInput(descripcion),
             ciudad: sanitizeInput(ciudad),
+            telefono: sanitizeInput(telefono),
             fotoUrl,
             usuario: req.usuario.id
         });
@@ -83,14 +84,15 @@ exports.actualizarMascota = async (req, res) => {
             return res.status(403).json({ msg: 'No tienes permiso para modificar esta mascota' });
         }
 
-        const { nombre, tipo, raza, edad, descripcion, ciudad } = req.body;
+        const { nombre, tipo, raza, edad, descripcion, ciudad, telefono } = req.body;
         const updateData = {
             nombre: sanitizeInput(nombre),
             tipo: sanitizeInput(tipo),
             raza: sanitizeInput(raza),
             edad,
             descripcion: sanitizeInput(descripcion),
-            ciudad: sanitizeInput(ciudad)
+            ciudad: sanitizeInput(ciudad),
+            telefono: sanitizeInput(telefono)
         };
 
         if (req.file) {
@@ -104,7 +106,8 @@ exports.actualizarMascota = async (req, res) => {
                     console.error("Error borrando imagen anterior:", err);
                 }
             }
-            updateData.fotoUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+            // Guardar solo el path relativo
+            updateData.fotoUrl = `/uploads/${req.file.filename}`;
         }
 
         const mascotaActualizada = await Mascota.findByIdAndUpdate(

@@ -10,7 +10,7 @@ const sanitizeInput = (value) => {
     return value;
 };
 
-// Helper: subir buffer a Cloudinary (retorna resultado)
+// Helper: subir buffer a Cloudinary
 const uploadBufferToCloudinary = (buffer, folder = 'petway') => {
     return new Promise((resolve, reject) => {
         const upload_stream = cloudinary.uploader.upload_stream(
@@ -32,11 +32,16 @@ exports.crearMascota = async (req, res) => {
         let fotoUrl = '';
         let fotoPublicId = '';
 
-        // Si llegó archivo en memoria (multer.memoryStorage)
+        // Si hay archivo en buffer (multer memoryStorage)
         if (req.file && req.file.buffer) {
-            const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
-            fotoUrl = result.secure_url;
-            fotoPublicId = result.public_id;
+            try {
+                const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
+                fotoUrl = result.secure_url;
+                fotoPublicId = result.public_id;
+            } catch (uploadError) {
+                console.error('Error subiendo a Cloudinary:', uploadError);
+                return res.status(500).json({ msg: 'Error al subir la imagen' });
+            }
         }
 
         const mascota = new Mascota({
@@ -115,20 +120,26 @@ exports.actualizarMascota = async (req, res) => {
             telefono: sanitizeInput(telefono ?? mascota.telefono)
         };
 
-        // Si suben nueva imagen en req.file.buffer -> subir a Cloudinary y borrar anterior
+        // Si suben nueva imagen
         if (req.file && req.file.buffer) {
-            // Borrar anterior en Cloudinary (si existe)
+            // Borrar anterior en Cloudinary si existe
             if (mascota.fotoPublicId) {
                 try {
                     await cloudinary.uploader.destroy(mascota.fotoPublicId);
                 } catch (err) {
-                    console.warn('No se pudo eliminar imagen anterior en Cloudinary:', err.message);
+                    console.warn('No se pudo eliminar imagen anterior:', err.message);
                 }
             }
 
-            const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
-            updateData.fotoUrl = result.secure_url;
-            updateData.fotoPublicId = result.public_id;
+            // Subir nueva imagen
+            try {
+                const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
+                updateData.fotoUrl = result.secure_url;
+                updateData.fotoPublicId = result.public_id;
+            } catch (uploadError) {
+                console.error('Error subiendo nueva imagen:', uploadError);
+                return res.status(500).json({ msg: 'Error al subir la nueva imagen' });
+            }
         }
 
         const mascotaActualizada = await Mascota.findByIdAndUpdate(
@@ -163,7 +174,7 @@ exports.eliminarMascota = async (req, res) => {
             try {
                 await cloudinary.uploader.destroy(mascota.fotoPublicId);
             } catch (err) {
-                console.error("Error borrando imagen en Cloudinary:", err);
+                console.error("Error borrando imagen de Cloudinary:", err);
             }
         }
 

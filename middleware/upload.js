@@ -1,28 +1,28 @@
 const multer = require('multer');
 const path = require('path');
 
-// Configurar almacenamiento
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/'); // Carpeta donde se guardarán las imágenes
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname)); // nombre único
-    },
-});
+// Configurar almacenamiento en memoria
+const storage = multer.memoryStorage();
 
 // Validar tipo de archivo
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png/;
+    const allowedTypes = /jpeg|jpg|png|webp/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
+
     if (extname && mimetype) {
         cb(null, true);
     } else {
-        cb(new Error('Formato de imagen no válido. Solo jpg, jpeg o png.'));
+        cb(new Error('Solo se permiten imágenes (JPEG, JPG, PNG, WEBP)'), false);
     }
 };
 
-const upload = multer({ storage, fileFilter });
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // Límite de 5MB
+    }
+});
 
 module.exports = upload;

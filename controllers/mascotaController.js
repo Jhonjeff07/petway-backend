@@ -1,14 +1,27 @@
 const Mascota = require('../models/Mascota');
-const User = require('../models/User');
-const fs = require('fs').promises;
-const path = require('path');
+const cloudinary = require('../config/cloudinary');
+const streamifier = require('streamifier');
 
 // Función para sanitizar entradas
 const sanitizeInput = (value) => {
     if (typeof value === 'string') {
-        return value.replace(/<[^>]*>?/gm, '');
+        return value.replace(/<[^>]*>?/gm, '').trim();
     }
     return value;
+};
+
+// Helper: subir buffer a Cloudinary (retorna resultado)
+const uploadBufferToCloudinary = (buffer, folder = 'petway') => {
+    return new Promise((resolve, reject) => {
+        const upload_stream = cloudinary.uploader.upload_stream(
+            { folder },
+            (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+            }
+        );
+        streamifier.createReadStream(buffer).pipe(upload_stream);
+    });
 };
 
 // Crear mascota
@@ -16,18 +29,26 @@ exports.crearMascota = async (req, res) => {
     try {
         const { nombre, tipo, raza, edad, descripcion, ciudad, telefono } = req.body;
 
-        // Guardar solo el path relativo en lugar de la URL completa
-        const fotoUrl = req.file ? `/uploads/${req.file.filename}` : '';
+        let fotoUrl = '';
+        let fotoPublicId = '';
+
+        // Si llegó archivo en memoria (multer.memoryStorage)
+        if (req.file && req.file.buffer) {
+            const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
+            fotoUrl = result.secure_url;
+            fotoPublicId = result.public_id;
+        }
 
         const mascota = new Mascota({
             nombre: sanitizeInput(nombre),
             tipo: sanitizeInput(tipo),
             raza: sanitizeInput(raza),
-            edad,
+            edad: sanitizeInput(edad),
             descripcion: sanitizeInput(descripcion),
             ciudad: sanitizeInput(ciudad),
             telefono: sanitizeInput(telefono),
             fotoUrl,
+            fotoPublicId,
             usuario: req.usuario.id
         });
 
@@ -56,7 +77,6 @@ exports.obtenerMascotas = async (req, res) => {
 exports.obtenerMascotaPorId = async (req, res) => {
     try {
         const mascota = await Mascota.findById(req.params.id)
-            // 🔹 Asegúrate de incluir '_id' en el populate
             .populate('usuario', 'nombre _id');
 
         if (!mascota) {
@@ -86,33 +106,34 @@ exports.actualizarMascota = async (req, res) => {
 
         const { nombre, tipo, raza, edad, descripcion, ciudad, telefono } = req.body;
         const updateData = {
-            nombre: sanitizeInput(nombre),
-            tipo: sanitizeInput(tipo),
-            raza: sanitizeInput(raza),
-            edad,
-            descripcion: sanitizeInput(descripcion),
-            ciudad: sanitizeInput(ciudad),
-            telefono: sanitizeInput(telefono)
+            nombre: sanitizeInput(nombre ?? mascota.nombre),
+            tipo: sanitizeInput(tipo ?? mascota.tipo),
+            raza: sanitizeInput(raza ?? mascota.raza),
+            edad: sanitizeInput(edad ?? mascota.edad),
+            descripcion: sanitizeInput(descripcion ?? mascota.descripcion),
+            ciudad: sanitizeInput(ciudad ?? mascota.ciudad),
+            telefono: sanitizeInput(telefono ?? mascota.telefono)
         };
 
-        if (req.file) {
-            // Eliminar la imagen anterior si existe
-            if (mascota.fotoUrl) {
-                const oldFilename = mascota.fotoUrl.split('/').pop();
-                const oldPath = path.join(__dirname, '../uploads', oldFilename);
+        // Si suben nueva imagen en req.file.buffer -> subir a Cloudinary y borrar anterior
+        if (req.file && req.file.buffer) {
+            // Borrar anterior en Cloudinary (si existe)
+            if (mascota.fotoPublicId) {
                 try {
-                    await fs.unlink(oldPath);
+                    await cloudinary.uploader.destroy(mascota.fotoPublicId);
                 } catch (err) {
-                    console.error("Error borrando imagen anterior:", err);
+                    console.warn('No se pudo eliminar imagen anterior en Cloudinary:', err.message);
                 }
             }
-            // Guardar solo el path relativo
-            updateData.fotoUrl = `/uploads/${req.file.filename}`;
+
+            const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
+            updateData.fotoUrl = result.secure_url;
+            updateData.fotoPublicId = result.public_id;
         }
 
         const mascotaActualizada = await Mascota.findByIdAndUpdate(
             req.params.id,
-            updateData,
+            { $set: updateData },
             { new: true }
         );
 
@@ -137,14 +158,12 @@ exports.eliminarMascota = async (req, res) => {
             return res.status(403).json({ msg: 'No tienes permiso para eliminar esta mascota' });
         }
 
-        // Eliminar la imagen asociada si existe
-        if (mascota.fotoUrl) {
-            const filename = mascota.fotoUrl.split('/').pop();
-            const filePath = path.join(__dirname, '../uploads', filename);
+        // Eliminar la imagen en Cloudinary si existe
+        if (mascota.fotoPublicId) {
             try {
-                await fs.unlink(filePath);
+                await cloudinary.uploader.destroy(mascota.fotoPublicId);
             } catch (err) {
-                console.error("Error borrando imagen:", err);
+                console.error("Error borrando imagen en Cloudinary:", err);
             }
         }
 
@@ -156,7 +175,7 @@ exports.eliminarMascota = async (req, res) => {
     }
 };
 
-// 🔹 Cambiar estado de la mascota
+// Cambiar estado de la mascota
 exports.cambiarEstadoMascota = async (req, res) => {
     try {
         const { estado } = req.body;
@@ -170,7 +189,6 @@ exports.cambiarEstadoMascota = async (req, res) => {
             return res.status(403).json({ msg: 'No tienes permiso para modificar esta mascota' });
         }
 
-        // Actualizar solo el estado
         mascota.estado = estado;
         await mascota.save();
 

@@ -1,3 +1,4 @@
+// routes/mascotas.js
 const express = require('express');
 const router = express.Router();
 const {
@@ -9,45 +10,24 @@ const {
     cambiarEstadoMascota
 } = require('../controllers/mascotaController');
 const verificarToken = require('../middleware/authMiddleware');
-const upload = require('../middleware/upload');
+const upload = require('../middleware/upload'); // alias para multer en memoria
 
-// =============================
-// 🔹 Crear mascota con imagen (protegido)
-// =============================
-router.post('/', verificarToken, upload.single('foto'), (req, res) => {
-    const datosMascota = {
-        ...req.body,
-        fotoUrl: req.file
-            ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
-            : '',
-    };
-    req.body = datosMascota;
-    crearMascota(req, res);
-});
+// Crear mascota (protegido) -> multer en memoria y controlador manejará Cloudinary
+router.post('/', verificarToken, upload.single('foto'), crearMascota);
 
-// =============================
-// 🔹 Obtener todas las mascotas (público)
-// =============================
+// Obtener todas las mascotas (público)
 router.get('/', obtenerMascotas);
 
-// =============================
-// 🔹 Obtener una mascota por ID (público)
-// =============================
+// Obtener una mascota por ID (público)
 router.get('/:id', obtenerMascotaPorId);
 
-// =============================
-// 🔹 Actualizar mascota (protegido)
-// =============================
-router.put('/:id', verificarToken, actualizarMascota);
+// Actualizar mascota (protegido) -> permitir subir nueva foto
+router.put('/:id', verificarToken, upload.single('foto'), actualizarMascota);
 
-// =============================
-// 🔹 Cambiar estado de mascota (protegido)
-// =============================
-router.patch('/:id/estado', verificarToken, cambiarEstadoMascota); // 🔹 Nueva ruta
+// Cambiar estado de mascota (protegido)
+router.patch('/:id/estado', verificarToken, cambiarEstadoMascota);
 
-// =============================
-// 🔹 Eliminar mascota (protegido)
-// =============================
+// Eliminar mascota (protegido)
 router.delete('/:id', verificarToken, eliminarMascota);
 
 module.exports = router;

@@ -1,3 +1,4 @@
+// controllers/mascotaController.js
 const Mascota = require('../models/Mascota');
 const cloudinary = require('../config/cloudinary');
 const streamifier = require('streamifier');
@@ -8,6 +9,12 @@ const sanitizeInput = (value) => {
         return value.replace(/<[^>]*>?/gm, '').trim();
     }
     return value;
+};
+
+// Normalizar teléfono: dejar solo + y dígitos
+const sanitizePhone = (phone) => {
+    if (!phone) return '';
+    return String(phone).replace(/[^\d+]/g, '');
 };
 
 // Helper: subir buffer a Cloudinary
@@ -27,7 +34,8 @@ const uploadBufferToCloudinary = (buffer, folder = 'petway') => {
 // Crear mascota
 exports.crearMascota = async (req, res) => {
     try {
-        const { nombre, tipo, raza, edad, descripcion, ciudad, telefono } = req.body;
+        const { nombre, tipo, raza, edad, descripcion, ciudad } = req.body;
+        let { telefono } = req.body;
 
         let fotoUrl = '';
         let fotoPublicId = '';
@@ -44,6 +52,8 @@ exports.crearMascota = async (req, res) => {
             }
         }
 
+        telefono = sanitizePhone(telefono);
+
         const mascota = new Mascota({
             nombre: sanitizeInput(nombre),
             tipo: sanitizeInput(tipo),
@@ -51,7 +61,7 @@ exports.crearMascota = async (req, res) => {
             edad: sanitizeInput(edad),
             descripcion: sanitizeInput(descripcion),
             ciudad: sanitizeInput(ciudad),
-            telefono: sanitizeInput(telefono),
+            telefono,
             fotoUrl,
             fotoPublicId,
             usuario: req.usuario.id
@@ -109,7 +119,9 @@ exports.actualizarMascota = async (req, res) => {
             return res.status(403).json({ msg: 'No tienes permiso para modificar esta mascota' });
         }
 
-        const { nombre, tipo, raza, edad, descripcion, ciudad, telefono } = req.body;
+        const { nombre, tipo, raza, edad, descripcion, ciudad } = req.body;
+        let { telefono } = req.body;
+
         const updateData = {
             nombre: sanitizeInput(nombre ?? mascota.nombre),
             tipo: sanitizeInput(tipo ?? mascota.tipo),
@@ -117,8 +129,10 @@ exports.actualizarMascota = async (req, res) => {
             edad: sanitizeInput(edad ?? mascota.edad),
             descripcion: sanitizeInput(descripcion ?? mascota.descripcion),
             ciudad: sanitizeInput(ciudad ?? mascota.ciudad),
-            telefono: sanitizeInput(telefono ?? mascota.telefono)
         };
+
+        telefono = sanitizePhone(telefono ?? mascota.telefono);
+        updateData.telefono = telefono;
 
         // Si suben nueva imagen
         if (req.file && req.file.buffer) {

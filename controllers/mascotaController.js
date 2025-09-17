@@ -40,7 +40,6 @@ exports.crearMascota = async (req, res) => {
         let fotoUrl = '';
         let fotoPublicId = '';
 
-        // Si hay archivo en buffer (multer memoryStorage)
         if (req.file && req.file.buffer) {
             try {
                 const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
@@ -114,7 +113,6 @@ exports.actualizarMascota = async (req, res) => {
             return res.status(404).json({ msg: 'Mascota no encontrada' });
         }
 
-        // Verificar si el usuario autenticado es el dueño
         if (mascota.usuario.toString() !== req.usuario.id) {
             return res.status(403).json({ msg: 'No tienes permiso para modificar esta mascota' });
         }
@@ -134,9 +132,7 @@ exports.actualizarMascota = async (req, res) => {
         telefono = sanitizePhone(telefono ?? mascota.telefono);
         updateData.telefono = telefono;
 
-        // Si suben nueva imagen
         if (req.file && req.file.buffer) {
-            // Borrar anterior en Cloudinary si existe
             if (mascota.fotoPublicId) {
                 try {
                     await cloudinary.uploader.destroy(mascota.fotoPublicId);
@@ -145,7 +141,6 @@ exports.actualizarMascota = async (req, res) => {
                 }
             }
 
-            // Subir nueva imagen
             try {
                 const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
                 updateData.fotoUrl = result.secure_url;
@@ -178,12 +173,10 @@ exports.eliminarMascota = async (req, res) => {
             return res.status(404).json({ msg: 'Mascota no encontrada' });
         }
 
-        // Verificar si el usuario autenticado es el dueño
         if (mascota.usuario.toString() !== req.usuario.id) {
             return res.status(403).json({ msg: 'No tienes permiso para eliminar esta mascota' });
         }
 
-        // Eliminar la imagen en Cloudinary si existe
         if (mascota.fotoPublicId) {
             try {
                 await cloudinary.uploader.destroy(mascota.fotoPublicId);
@@ -224,5 +217,18 @@ exports.cambiarEstadoMascota = async (req, res) => {
     } catch (error) {
         console.error('Error cambiando estado:', error);
         res.status(500).json({ msg: 'Error al cambiar el estado' });
+    }
+};
+
+// 🔹 Nueva función: obtener mascotas del usuario autenticado
+exports.obtenerMisMascotas = async (req, res) => {
+    try {
+        const mascotas = await Mascota.find({ usuario: req.usuario.id })
+            .populate('usuario', 'nombre email')
+            .sort({ createdAt: -1 });
+        res.json(mascotas);
+    } catch (error) {
+        console.error("❌ Error al obtener mis mascotas:", error);
+        res.status(500).json({ msg: "Error al obtener tus mascotas" });
     }
 };

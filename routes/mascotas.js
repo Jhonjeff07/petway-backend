@@ -9,7 +9,8 @@ const {
     obtenerMascotaPorId,
     actualizarMascota,
     eliminarMascota,
-    cambiarEstadoMascota
+    cambiarEstadoMascota,
+    obtenerMisMascotas // ✅ nuevo
 } = require('../controllers/mascotaController');
 const verificarToken = require('../middleware/authMiddleware');
 const upload = require('../middleware/upload'); // memoria
@@ -22,7 +23,7 @@ const validar = (req, res, next) => {
     next();
 };
 
-// Crear mascota (protegido) -> multer memory + validaciones
+// Crear mascota
 router.post(
     '/',
     verificarToken,
@@ -37,13 +38,16 @@ router.post(
     crearMascota
 );
 
-// Obtener todas las mascotas (público)
+// Obtener todas
 router.get('/', obtenerMascotas);
 
-// Obtener una mascota por ID (público)
+// Obtener mis mascotas (protegido) ✅
+router.get('/mias', verificarToken, obtenerMisMascotas);
+
+// Obtener una por ID
 router.get('/:id', obtenerMascotaPorId);
 
-// Actualizar mascota (protegido) -> permitir subir nueva foto
+// Actualizar
 router.put(
     '/:id',
     verificarToken,
@@ -58,10 +62,10 @@ router.put(
     actualizarMascota
 );
 
-// Cambiar estado de mascota (protegido)
+// Cambiar estado
 router.patch('/:id/estado', verificarToken, cambiarEstadoMascota);
 
-// Eliminar mascota (protegido)
+// Eliminar
 router.delete('/:id', verificarToken, eliminarMascota);
 
 module.exports = router;

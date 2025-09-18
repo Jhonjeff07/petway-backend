@@ -68,12 +68,12 @@ router.post(
   verificarRespuestaSecreta
 );
 
-// Restablecer password (olvidada)
+// 🔹 Restablecer password (olvidada, con token)
 router.post(
   '/restablecer-password',
   [
-    body('email').isEmail().withMessage('El email es inválido').normalizeEmail(),
-    body('password')
+    body('token').notEmpty().withMessage('El token es requerido'),
+    body('nuevaPassword')
       .isLength({ min: 8 })
       .withMessage('La nueva contraseña debe tener al menos 8 caracteres')
   ],
@@ -81,14 +81,18 @@ router.post(
   restablecerPassword
 );
 
-// Cambiar password (usuario autenticado)
+// 🔹 Cambiar password (usuario autenticado)
 router.post(
   '/cambiar-password',
   auth,
   [
-    body('password')
+    body('currentPassword').notEmpty().withMessage('La contraseña actual es obligatoria'),
+    body('newPassword')
+      .optional()
       .isLength({ min: 8 })
-      .withMessage('La nueva contraseña debe tener al menos 8 caracteres')
+      .withMessage('La nueva contraseña debe tener al menos 8 caracteres'),
+    body('securityQuestion').optional().trim(),
+    body('securityAnswer').optional().trim()
   ],
   validar,
   cambiarPassword

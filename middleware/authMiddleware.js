@@ -20,13 +20,19 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ msg: 'Token no válido - usuario no existe' });
     }
 
-    // Adjuntar usuario a la solicitud
-    req.usuario = usuario;
+    // 🔹 Compatibilidad: asegurar que siempre exista req.usuario.id
+    req.usuario = {
+      id: usuario._id.toString(),
+      nombre: usuario.nombre,
+      email: usuario.email,
+      rol: usuario.rol || 'usuario',
+      _doc: usuario // guarda el documento original si lo necesitas
+    };
+
     next();
   } catch (error) {
     console.error('Error en middleware de autenticación:', error);
 
-    // Manejar diferentes tipos de errores
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ msg: 'Token expirado' });
     }

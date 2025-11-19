@@ -9,7 +9,9 @@ const {
   obtenerPreguntaSecreta,
   verificarRespuestaSecreta,
   restablecerPassword,
-  cambiarPassword
+  cambiarPassword,
+  verifyEmailCode,
+  resendVerificationCode
 } = require('../controllers/userController');
 const auth = require('../middleware/authMiddleware');
 
@@ -22,7 +24,7 @@ const validar = (req, res, next) => {
   next();
 };
 
-// Registro
+// Registro (mantengo la ruta '/' tal como estaba)
 router.post(
   '/',
   [
@@ -96,6 +98,28 @@ router.post(
   ],
   validar,
   cambiarPassword
+);
+
+// ========================
+// NUEVAS RUTAS: VERIFICACIÓN / REENVÍO
+// ========================
+router.post(
+  '/verify-email',
+  [
+    body('email').isEmail().withMessage('El email es inválido').normalizeEmail(),
+    body('code').trim().notEmpty().withMessage('El código es requerido')
+  ],
+  validar,
+  verifyEmailCode
+);
+
+router.post(
+  '/resend-verification',
+  [
+    body('email').isEmail().withMessage('El email es inválido').normalizeEmail()
+  ],
+  validar,
+  resendVerificationCode
 );
 
 module.exports = router;

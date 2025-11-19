@@ -15,8 +15,10 @@ const {
 } = require('../controllers/mascotaController');
 
 const verificarToken = require('../middleware/authMiddleware');
-const upload = require('../middleware/upload'); // memory or multer config
+const maybeAuth = require('../middleware/maybeAuthMiddleware'); // middleware opcional: añade req.usuario si existe
+const upload = require('../middleware/upload'); // multer (memoria) u otra configuración de subida
 
+// Helper para manejar resultados de express-validator
 const validar = (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -25,7 +27,19 @@ const validar = (req, res, next) => {
     next();
 };
 
-// Crear mascota (requiere lat + lng)
+// small async handler wrapper to forward unexpected errors to Express
+const asyncHandler = (fn) => (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+/**
+ * RUTAS
+ */
+
+/**
+ * POST /api/mascotas
+ * Crear mascota (restringido: requiere token)
+ */
 router.post(
     '/',
     verificarToken,
@@ -34,37 +48,56 @@ router.post(
         body('nombre').trim().notEmpty().withMessage('Nombre es obligatorio').escape(),
         body('tipo').trim().notEmpty().withMessage('Tipo es obligatorio').escape(),
         body('ciudad').trim().notEmpty().withMessage('Ciudad es obligatoria').escape(),
-        body('telefono').optional().trim().matches(/^[+]?[\d\s\-()]{7,20}$/).withMessage('Teléfono inválido'),
-        body('lat').notEmpty().withMessage('Latitud requerida').isFloat({ min: -90, max: 90 }).withMessage('Latitud inválida'),
-        body('lng').notEmpty().withMessage('Longitud requerida').isFloat({ min: -180, max: 180 }).withMessage('Longitud inválida')
+        body('telefono')
+            .optional()
+            .trim()
+            .matches(/^[+]?[\d\s\-()]{7,20}$/)
+            .withMessage('Teléfono inválido')
+            .escape(),
+        body('lat')
+            .notEmpty().withMessage('Latitud requerida')
+            .isFloat({ min: -90, max: 90 }).withMessage('Latitud inválida'),
+        body('lng')
+            .notEmpty().withMessage('Longitud requerida')
+            .isFloat({ min: -180, max: 180 }).withMessage('Longitud inválida')
     ],
     validar,
-    crearMascota
+    asyncHandler(crearMascota)
 );
 
-// Obtener todas (sin filtro)
-router.get('/', obtenerMascotas);
+/**
+ * GET /api/mascotas
+ */
+router.get('/', maybeAuth, asyncHandler(obtenerMascotas));
 
-// Buscar por proximidad
-// GET /api/mascotas/near?lat=..&lng=..&radius=1000
+/**
+ * GET /api/mascotas/near
+ */
 router.get(
     '/near',
+    maybeAuth,
     [
         query('lat').notEmpty().withMessage('lat es requerido').isFloat({ min: -90, max: 90 }),
         query('lng').notEmpty().withMessage('lng es requerido').isFloat({ min: -180, max: 180 }),
         query('radius').optional().isInt({ min: 0 }).toInt()
     ],
     validar,
-    obtenerMascotasNear
+    asyncHandler(obtenerMascotasNear)
 );
 
-// Obtener mis mascotas (protegido)
-router.get('/mias', verificarToken, obtenerMisMascotas);
+/**
+ * GET /api/mascotas/mias
+ */
+router.get('/mias', verificarToken, asyncHandler(obtenerMisMascotas));
 
-// Obtener una por ID
-router.get('/:id', obtenerMascotaPorId);
+/**
+ * GET /api/mascotas/:id
+ */
+router.get('/:id', maybeAuth, asyncHandler(obtenerMascotaPorId));
 
-// Actualizar (opcional lat/lng)
+/**
+ * PUT /api/mascotas/:id
+ */
 router.put(
     '/:id',
     verificarToken,
@@ -73,18 +106,27 @@ router.put(
         body('nombre').optional().trim().notEmpty().withMessage('Nombre inválido').escape(),
         body('tipo').optional().trim().notEmpty().withMessage('Tipo inválido').escape(),
         body('ciudad').optional().trim().notEmpty().withMessage('Ciudad inválida').escape(),
-        body('telefono').optional().trim().matches(/^[+]?[\d\s\-()]{7,20}$/).withMessage('Teléfono inválido'),
+        body('telefono')
+            .optional()
+            .trim()
+            .matches(/^[+]?[\d\s\-()]{7,20}$/)
+            .withMessage('Teléfono inválido')
+            .escape(),
         body('lat').optional().isFloat({ min: -90, max: 90 }).withMessage('Latitud inválida'),
         body('lng').optional().isFloat({ min: -180, max: 180 }).withMessage('Longitud inválida')
     ],
     validar,
-    actualizarMascota
+    asyncHandler(actualizarMascota)
 );
 
-// Cambiar estado
-router.patch('/:id/estado', verificarToken, cambiarEstadoMascota);
+/**
+ * PATCH /api/mascotas/:id/estado
+ */
+router.patch('/:id/estado', verificarToken, asyncHandler(cambiarEstadoMascota));
 
-// Eliminar
-router.delete('/:id', verificarToken, eliminarMascota);
+/**
+ * DELETE /api/mascotas/:id
+ */
+router.delete('/:id', verificarToken, asyncHandler(eliminarMascota));
 
 module.exports = router;

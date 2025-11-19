@@ -1,13 +1,31 @@
+// controllers/userController.js
+
 // Importación de dependencias y modelos
 const User = require("../models/User"); // Modelo de usuario en la base de datos
 const bcrypt = require("bcryptjs"); // Librería para encriptar contraseñas y respuestas secretas
 const jwt = require("jsonwebtoken"); // Librería para generar y verificar tokens JWT
+
+// Nuevas importaciones para verificación por email
+const EmailVerification = require('../models/EmailVerification'); // asegúrate de tener este modelo
+const transporter = require('../config/mailer'); // tu config de nodemailer
+const crypto = require('crypto');
+
+// ============================================================
+// HELPERS
+// ============================================================
+const generateCode = () => {
+  // Código numérico de 6 dígitos
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+const allowedDomains = ['gmail.com', 'hotmail.com', 'outlook.com'];
 
 // ============================================================
 // REGISTRAR USUARIO
 // ============================================================
 // Crea un nuevo usuario verificando datos, encriptando la contraseña
 // y guardando también la respuesta secreta encriptada.
+// Además: genera código de verificación por email y lo envía.
 const registrarUsuario = async (req, res) => {
   try {
     const { nombre, email, password, preguntaSecreta, respuestaSecreta } = req.body;
@@ -21,6 +39,12 @@ const registrarUsuario = async (req, res) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ msg: "Formato de email inválido" });
+    }
+
+    // Validación de dominio permitido (solo gmail/hotmail/outlook)
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain || !allowedDomains.includes(domain)) {
+      return res.status(400).json({ msg: "Sólo se permiten correos Gmail, Hotmail o Outlook" });
     }
 
     // Validación de longitud mínima de contraseña
@@ -42,19 +66,48 @@ const registrarUsuario = async (req, res) => {
     const respuestaNormalizada = respuestaSecreta.trim().toLowerCase();
     const respuestaSecretaHash = await bcrypt.hash(respuestaNormalizada, salt);
 
-    // Crear objeto del nuevo usuario
+    // Crear objeto del nuevo usuario (verified: false por defecto)
     const nuevoUsuario = new User({
       nombre: nombre.replace(/<[^>]*>?/gm, ""), // Sanitizar nombre (remueve etiquetas HTML)
       email,
       password: passwordHash,
       preguntaSecreta,
-      respuestaSecreta: respuestaSecretaHash
+      respuestaSecreta: respuestaSecretaHash,
+      verified: false
     });
 
     // Guardar en base de datos
     await nuevoUsuario.save();
 
-    res.status(201).json({ msg: "Usuario registrado correctamente" });
+    // Generar código y registro de verificación
+    const code = generateCode();
+    const ttlMin = parseInt(process.env.CONTACT_CODE_TTL_MINUTES || '10', 10);
+    const expiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
+
+    await EmailVerification.create({
+      email,
+      code,
+      expiresAt
+    });
+
+    // Enviar correo con código
+    try {
+      const mailOptions = {
+        from: process.env.SMTP_FROM || `"PetWay" <no-reply@petway.local>`,
+        to: email,
+        subject: 'Verifica tu correo en PetWay',
+        text: `Tu código de verificación es: ${code}\nEste código expira en ${ttlMin} minutos.`,
+        html: `<p>Tu código de verificación es: <strong>${code}</strong></p><p>Expira en ${ttlMin} minutos.</p>`
+      };
+
+      await transporter.sendMail(mailOptions);
+    } catch (mailErr) {
+      console.error('Error enviando email de verificación:', mailErr);
+      // No fallamos el registro por un problema de email, pero avisamos al usuario
+      return res.status(201).json({ msg: 'Usuario registrado. No se pudo enviar el correo de verificación, inténtalo más tarde.' });
+    }
+
+    res.status(201).json({ msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación." });
 
   } catch (error) {
     console.error("❌ Error en registrarUsuario:", error);
@@ -76,7 +129,7 @@ const loginUsuario = async (req, res) => {
     }
 
     // Buscar usuario por email y traer el campo password
-    const usuario = await User.findOne({ email }).select("+password");
+    const usuario = await User.findOne({ email }).select("+password +respuestaSecreta +verified");
     if (!usuario) {
       return res.status(400).json({ msg: "Credenciales inválidas" });
     }
@@ -95,7 +148,8 @@ const loginUsuario = async (req, res) => {
       _id: usuario._id,
       nombre: usuario.nombre,
       email: usuario.email,
-      createdAt: usuario.createdAt
+      createdAt: usuario.createdAt,
+      verified: !!usuario.verified // añadimos flag de verificación
     };
 
     // Establecer cookie HTTPOnly para mayor seguridad
@@ -171,8 +225,6 @@ const verificarRespuestaSecreta = async (req, res) => {
 // ============================================================
 // RESTABLECER PASSWORD
 // ============================================================
-// Permite cambiar la contraseña usando un token generado tras
-// validar la respuesta secreta correctamente.
 const restablecerPassword = async (req, res) => {
   try {
     const { token, nuevaPassword } = req.body;
@@ -224,8 +276,6 @@ const restablecerPassword = async (req, res) => {
 // ============================================================
 // CAMBIAR PASSWORD Y PREGUNTA SECRETA
 // ============================================================
-// Permite al usuario cambiar su contraseña actual y/o actualizar
-// su pregunta y respuesta secreta.
 const cambiarPassword = async (req, res) => {
   try {
     const { currentPassword, newPassword, securityQuestion, securityAnswer } = req.body;
@@ -277,8 +327,6 @@ const cambiarPassword = async (req, res) => {
 // ============================================================
 // VERIFICAR CONTRASEÑA (DEBUG)
 // ============================================================
-// Función auxiliar para pruebas: compara una contraseña ingresada
-// con la almacenada y devuelve el resultado.
 const verificarContraseña = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -304,6 +352,73 @@ const verificarContraseña = async (req, res) => {
 };
 
 // ============================================================
+// NUEVAS RUTAS: VERIFICACIÓN DE EMAIL Y REENVÍO
+// ============================================================
+const verifyEmailCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ msg: 'Email y código requeridos' });
+
+    const record = await EmailVerification.findOne({ email, code, used: false }).sort({ createdAt: -1 });
+    if (!record) return res.status(400).json({ msg: 'Código inválido o ya usado' });
+
+    if (record.expiresAt < new Date()) {
+      return res.status(400).json({ msg: 'Código expirado' });
+    }
+
+    // marcar como usado
+    record.used = true;
+    await record.save();
+
+    // actualizar usuario a verified = true
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
+
+    user.verified = true;
+    await user.save();
+
+    return res.json({ msg: 'Correo verificado. Ya puedes iniciar sesión' });
+  } catch (err) {
+    console.error('Error verifyEmailCode:', err);
+    return res.status(500).json({ msg: 'Error verificando código' });
+  }
+};
+
+const resendVerificationCode = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ msg: 'Email requerido' });
+
+    // Limit simple: no reenvío en menos de 60s
+    const last = await EmailVerification.findOne({ email }).sort({ createdAt: -1 });
+    if (last && (Date.now() - last.createdAt.getTime()) < 60 * 1000) {
+      return res.status(429).json({ msg: 'Espera antes de solicitar otro código (1 minuto)' });
+    }
+
+    const code = generateCode();
+    const ttlMin = parseInt(process.env.CONTACT_CODE_TTL_MINUTES || '10', 10);
+    const expiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
+
+    await EmailVerification.create({ email, code, expiresAt });
+
+    const mailOptions = {
+      from: process.env.SMTP_FROM || `"PetWay" <no-reply@petway.local>`,
+      to: email,
+      subject: 'Reenvío: código de verificación PetWay',
+      text: `Tu código de verificación es: ${code}\nExpira en ${ttlMin} minutos.`,
+      html: `<p>Tu código de verificación es: <strong>${code}</strong></p><p>Expira en ${ttlMin} minutos.</p>`
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return res.json({ msg: 'Código reenviado' });
+  } catch (err) {
+    console.error('Error resendVerificationCode:', err);
+    return res.status(500).json({ msg: 'Error reenviando código' });
+  }
+};
+
+// ============================================================
 // EXPORTACIÓN DE FUNCIONES
 // ============================================================
 module.exports = {
@@ -313,5 +428,8 @@ module.exports = {
   verificarRespuestaSecreta,
   restablecerPassword,
   cambiarPassword,
-  verificarContraseña
+  verificarContraseña,
+  // nuevas exportaciones
+  verifyEmailCode,
+  resendVerificationCode
 };

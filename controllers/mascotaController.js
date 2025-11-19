@@ -144,6 +144,10 @@ exports.obtenerMascotas = async (req, res) => {
 
         const mascotas = mascotasDocs.map(m => {
             const obj = m.toObject ? m.toObject() : m;
+            // ocultar teléfono si requester no está autenticado
+            if (!req.usuario) {
+                delete obj.telefono;
+            }
             return maskLocationIfNeeded(obj, requesterId);
         });
 
@@ -166,6 +170,12 @@ exports.obtenerMascotaPorId = async (req, res) => {
         }
 
         const mascotaObj = mascotaDoc.toObject();
+
+        // Ocultar teléfono si la petición no viene de un usuario autenticado
+        if (!req.usuario) {
+            delete mascotaObj.telefono;
+        }
+
         const masked = maskLocationIfNeeded(mascotaObj, requesterId);
         return res.json(masked);
     } catch (error) {
@@ -342,6 +352,10 @@ exports.obtenerMascotasNear = async (req, res) => {
         const requesterId = req.usuario && req.usuario.id ? req.usuario.id : null;
         const mascotas = mascotasDocs.map((m) => {
             const obj = m.toObject ? m.toObject() : m;
+            // ocultar teléfono si requester no está autenticado
+            if (!req.usuario) {
+                delete obj.telefono;
+            }
             return maskLocationIfNeeded(obj, requesterId);
         });
 

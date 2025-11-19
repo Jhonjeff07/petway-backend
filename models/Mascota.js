@@ -1,4 +1,4 @@
-// models/mascota.js
+// models/Mascota.js
 const mongoose = require('mongoose');
 
 const UbicacionSchema = new mongoose.Schema({
@@ -10,7 +10,14 @@ const UbicacionSchema = new mongoose.Schema({
   coordinates: {
     // [lng, lat]
     type: [Number],
-    required: function () { return !!this.coordinates; } // validate presence when used
+    // required solo si se provee el campo ubicacion (valida longitud)
+    validate: {
+      validator: function (v) {
+        if (!v) return true; // permite no tener ubicación
+        return Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number');
+      },
+      message: 'Ubicación debe ser un array [lng, lat] de números'
+    }
   }
 }, { _id: false });
 
@@ -29,12 +36,10 @@ const MascotaSchema = new mongoose.Schema({
   ubicacion: {
     type: UbicacionSchema,
     index: '2dsphere',
-    required: false // en algunos casos podrías permitir sin ubicación, pero para reportes se recomienda exigirla
+    required: false
   },
   createdAt: { type: Date, default: Date.now }
 });
 
-// Si prefieres forzar creación de índice al iniciar la app (solo una vez):
-// MascotaSchema.index({ 'ubicacion': '2dsphere' });
-
+// Exportamos modelo sin requerir nada más (evita ciclos)
 module.exports = mongoose.model('Mascota', MascotaSchema);

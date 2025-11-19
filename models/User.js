@@ -1,3 +1,4 @@
+// models/User.js
 const mongoose = require('mongoose');
 
 const UsuarioSchema = new mongoose.Schema({
@@ -30,6 +31,10 @@ const UsuarioSchema = new mongoose.Schema({
         type: String,
         required: [true, 'La respuesta secreta es obligatoria'],
         select: false
+    },
+    verified: {
+        type: Boolean,
+        default: false
     },
     createdAt: {
         type: Date,

@@ -99,16 +99,23 @@ const registrarUsuario = async (req, res) => {
 
       const { info, previewUrl } = await mailer.sendMail(mailOptions);
 
-      // Responder con preview en dev (si aplica)
+      console.log('✅ Email de verificación enviado a:', email);
+      if (previewUrl) {
+        console.log('📧 Preview URL (Ethereal):', previewUrl);
+      }
+
       return res.status(201).json({
         msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación.",
         preview: previewUrl || null
       });
 
     } catch (mailErr) {
-      console.error('Error enviando email de verificación:', mailErr);
-      // No fallamos el registro por un problema de email, pero avisamos al usuario
-      return res.status(201).json({ msg: 'Usuario registrado. No se pudo enviar el correo de verificación, inténtalo más tarde.' });
+      console.error('❌ Error enviando email de verificación:', mailErr);
+      // ⚠️ IMPORTANTE: El usuario se creó pero no se pudo enviar el email
+      return res.status(201).json({
+        msg: 'Usuario registrado. No se pudo enviar el correo de verificación, usa la opción "Reenviar código".',
+        email: email
+      });
     }
 
   } catch (error) {
@@ -118,7 +125,7 @@ const registrarUsuario = async (req, res) => {
 };
 
 // ============================================================
-// LOGIN USUARIO
+// LOGIN USUARIO - CORREGIDO PARA VERIFICACIÓN Y COOKIES CROSS-SITE
 // ============================================================
 const loginUsuario = async (req, res) => {
   try {
@@ -133,6 +140,15 @@ const loginUsuario = async (req, res) => {
     const usuario = await User.findOne({ email }).select("+password +respuestaSecreta +verified");
     if (!usuario) {
       return res.status(400).json({ msg: "Credenciales inválidas" });
+    }
+
+    // ✅ NUEVO: Verificar si el email está verificado
+    if (!usuario.verified) {
+      return res.status(403).json({
+        msg: "Email no verificado. Por favor verifica tu correo antes de iniciar sesión.",
+        needsVerification: true,
+        email: email
+      });
     }
 
     // Comparar contraseña ingresada con hash almacenado
@@ -150,15 +166,15 @@ const loginUsuario = async (req, res) => {
       nombre: usuario.nombre,
       email: usuario.email,
       createdAt: usuario.createdAt,
-      verified: !!usuario.verified // añadimos flag de verificación
+      verified: !!usuario.verified
     };
 
-    // Establecer cookie HTTPOnly para mayor seguridad
+    // ✅ CORREGIDO: Cookie para cross-site
     res.cookie("token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: true, // ✅ IMPORTANTE: true en producción
       maxAge: 3600000, // 1 hora
-      sameSite: "strict"
+      sameSite: "none" // ✅ IMPORTANTE: para cross-site
     });
 
     res.json({ token, usuario: usuarioRespuesta });
@@ -350,7 +366,7 @@ const verificarContraseña = async (req, res) => {
 };
 
 // ============================================================
-// NUEVAS RUTAS: VERIFICACIÓN DE EMAIL Y REENVÍO
+// NUEVAS RUTAS: VERIFICACIÓN DE EMAIL Y REENVÍO - CORREGIDAS
 // ============================================================
 const verifyEmailCode = async (req, res) => {
   try {
@@ -387,6 +403,17 @@ const resendVerificationCode = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ msg: 'Email requerido' });
 
+    // ✅ NUEVO: Verificar si el usuario existe
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+
+    // ✅ NUEVO: Verificar si ya está verificado
+    if (user.verified) {
+      return res.status(400).json({ msg: 'El usuario ya está verificado' });
+    }
+
     // Limit simple: no reenvío en menos de 60s
     const last = await EmailVerification.findOne({ email }).sort({ createdAt: -1 });
     if (last && (Date.now() - last.createdAt.getTime()) < 60 * 1000) {
@@ -410,14 +437,23 @@ const resendVerificationCode = async (req, res) => {
     // Usar wrapper que devuelve preview cuando corresponde
     try {
       const { info, previewUrl } = await mailer.sendMail(mailOptions);
-      return res.json({ msg: 'Código reenviado', preview: previewUrl || null });
+
+      console.log('✅ Código reenviado a:', email);
+      if (previewUrl) {
+        console.log('📧 Preview URL (Ethereal):', previewUrl);
+      }
+
+      return res.json({
+        msg: 'Código reenviado',
+        preview: previewUrl || null
+      });
     } catch (mailErr) {
-      console.error('Error resendVerificationCode (sendMail):', mailErr);
+      console.error('❌ Error resendVerificationCode (sendMail):', mailErr);
       return res.status(500).json({ msg: 'Error reenviando código' });
     }
 
   } catch (err) {
-    console.error('Error resendVerificationCode:', err);
+    console.error('❌ Error resendVerificationCode:', err);
     return res.status(500).json({ msg: 'Error reenviando código' });
   }
 };

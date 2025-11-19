@@ -7,7 +7,7 @@ const jwt = require("jsonwebtoken"); // Librería para generar y verificar token
 
 // Nuevas importaciones para verificación por email
 const EmailVerification = require('../models/EmailVerification'); // asegúrate de tener este modelo
-const transporter = require('../config/mailer'); // tu config de nodemailer
+const mailer = require('../config/mailer'); // ahora usamos el wrapper sendMail
 const crypto = require('crypto');
 
 // ============================================================
@@ -23,9 +23,6 @@ const allowedDomains = ['gmail.com', 'hotmail.com', 'outlook.com'];
 // ============================================================
 // REGISTRAR USUARIO
 // ============================================================
-// Crea un nuevo usuario verificando datos, encriptando la contraseña
-// y guardando también la respuesta secreta encriptada.
-// Además: genera código de verificación por email y lo envía.
 const registrarUsuario = async (req, res) => {
   try {
     const { nombre, email, password, preguntaSecreta, respuestaSecreta } = req.body;
@@ -90,7 +87,7 @@ const registrarUsuario = async (req, res) => {
       expiresAt
     });
 
-    // Enviar correo con código
+    // Enviar correo con código (usando mailer.sendMail)
     try {
       const mailOptions = {
         from: process.env.SMTP_FROM || `"PetWay" <no-reply@petway.local>`,
@@ -100,14 +97,19 @@ const registrarUsuario = async (req, res) => {
         html: `<p>Tu código de verificación es: <strong>${code}</strong></p><p>Expira en ${ttlMin} minutos.</p>`
       };
 
-      await transporter.sendMail(mailOptions);
+      const { info, previewUrl } = await mailer.sendMail(mailOptions);
+
+      // Responder con preview en dev (si aplica)
+      return res.status(201).json({
+        msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación.",
+        preview: previewUrl || null
+      });
+
     } catch (mailErr) {
       console.error('Error enviando email de verificación:', mailErr);
       // No fallamos el registro por un problema de email, pero avisamos al usuario
       return res.status(201).json({ msg: 'Usuario registrado. No se pudo enviar el correo de verificación, inténtalo más tarde.' });
     }
-
-    res.status(201).json({ msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación." });
 
   } catch (error) {
     console.error("❌ Error en registrarUsuario:", error);
@@ -118,7 +120,6 @@ const registrarUsuario = async (req, res) => {
 // ============================================================
 // LOGIN USUARIO
 // ============================================================
-// Verifica credenciales, genera un token JWT y establece cookie segura.
 const loginUsuario = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -171,7 +172,6 @@ const loginUsuario = async (req, res) => {
 // ============================================================
 // OBTENER PREGUNTA SECRETA
 // ============================================================
-// Retorna la pregunta secreta de un usuario según su email.
 const obtenerPreguntaSecreta = async (req, res) => {
   try {
     const { email } = req.body;
@@ -192,8 +192,6 @@ const obtenerPreguntaSecreta = async (req, res) => {
 // ============================================================
 // VERIFICAR RESPUESTA SECRETA
 // ============================================================
-// Compara la respuesta ingresada con el hash almacenado.
-// Si es correcta, genera un token temporal para restablecer contraseña.
 const verificarRespuestaSecreta = async (req, res) => {
   try {
     const { email, respuesta } = req.body;
@@ -409,9 +407,15 @@ const resendVerificationCode = async (req, res) => {
       html: `<p>Tu código de verificación es: <strong>${code}</strong></p><p>Expira en ${ttlMin} minutos.</p>`
     };
 
-    await transporter.sendMail(mailOptions);
+    // Usar wrapper que devuelve preview cuando corresponde
+    try {
+      const { info, previewUrl } = await mailer.sendMail(mailOptions);
+      return res.json({ msg: 'Código reenviado', preview: previewUrl || null });
+    } catch (mailErr) {
+      console.error('Error resendVerificationCode (sendMail):', mailErr);
+      return res.status(500).json({ msg: 'Error reenviando código' });
+    }
 
-    return res.json({ msg: 'Código reenviado' });
   } catch (err) {
     console.error('Error resendVerificationCode:', err);
     return res.status(500).json({ msg: 'Error reenviando código' });

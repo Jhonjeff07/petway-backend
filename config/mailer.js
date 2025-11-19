@@ -1,80 +1,87 @@
 // config/mailer.js
 const nodemailer = require('nodemailer');
 
-let _transporter = null;
-let _testAccount = null;
+let transport; // nodemailer transport instance
 
-async function getTransporter() {
-    if (_transporter) return _transporter;
+/**
+ * Inicializa el transportador según las variables de entorno.
+ * - Si se detecta SMTP_HOST/SMTP_USER/SMTP_PASS -> usa esos (producción).
+ * - Si no -> crea una cuenta Ethereal (dev) y retorna el transport.
+ */
+async function initTransport() {
+    if (transport) return transport;
 
-    const host = process.env.SMTP_HOST;
-    const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined;
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-    const secure = process.env.SMTP_SECURE === 'true' || (port === 465);
+    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE } = process.env;
 
-    if (host && port && user && pass) {
-        // Usar SMTP real (SendGrid, Mailgun, SMTP propio, etc.)
-        _transporter = nodemailer.createTransport({
-            host,
-            port,
-            secure: !!secure,
-            auth: { user, pass }
+    if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+        // Configuración SMTP real (production)
+        transport = nodemailer.createTransport({
+            host: SMTP_HOST,
+            port: parseInt(SMTP_PORT || '587', 10),
+            secure: (SMTP_SECURE === 'true'), // true para 465, false para 587
+            auth: {
+                user: SMTP_USER,
+                pass: SMTP_PASS,
+            },
+            tls: {
+                // Permitir conexiones seguras en algunos entornos (opcional)
+                rejectUnauthorized: false,
+            },
         });
-        return _transporter;
+
+        // Verificar (no obligatorio, pero útil)
+        try {
+            await transport.verify();
+            console.log('✅ SMTP transport listo (producción)');
+        } catch (err) {
+            console.warn('⚠️ Warning: no se pudo verificar SMTP real:', err.message);
+        }
+
+        return transport;
     }
 
-    // Fallback: crear cuenta de prueba Ethereal (NO PARA PRODUCCIÓN)
-    _testAccount = await nodemailer.createTestAccount();
-    _transporter = nodemailer.createTransport({
-        host: _testAccount.smtp.host,
-        port: _testAccount.smtp.port,
-        secure: _testAccount.smtp.secure,
-        auth: { user: _testAccount.user, pass: _testAccount.pass }
+    // Si no hay SMTP configurado: usar Ethereal (solo dev/test)
+    console.log('ℹ️ No SMTP configurado. Creando cuenta Ethereal para desarrollo/test...');
+    const testAccount = await nodemailer.createTestAccount();
+
+    transport = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: {
+            user: testAccount.user,
+            pass: testAccount.pass,
+        },
     });
 
-    // añadir marca para detectar que es cuenta de prueba
-    _transporter._isTest = true;
-    _transporter._testAccount = _testAccount;
-    return _transporter;
+    // Verified log
+    console.log('✅ Ethereal transport listo (dev). user:', testAccount.user);
+    return transport;
 }
 
 /**
- * Envía un email de verificación con un código numérico.
- * - to: dirección de destino
- * - code: código de verificación (string)
+ * sendMail wrapper:
+ * - Inicializa transport si es necesario
+ * - Envía el mail
+ * - Devuelve { info, previewUrl }
  */
-async function sendVerificationEmail(to, code) {
-    const transporter = await getTransporter();
+async function sendMail(mailOptions) {
+    const t = await initTransport();
+    const info = await t.sendMail(mailOptions);
 
-    const from = process.env.EMAIL_FROM || '"PetWay" <no-reply@petway.app>';
-    const subject = 'Verifica tu correo en PetWay';
-    const html = `
-    <div style="font-family: Arial, sans-serif; color: #111;">
-      <h2>Verificación de correo — PetWay</h2>
-      <p>Gracias por registrarte. Tu código de verificación es:</p>
-      <div style="font-size: 24px; font-weight: 700; margin: 10px 0; color: #0077b6;">${code}</div>
-      <p>Ingresa este código en la app para verificar tu correo. Este código expira en 15 minutos.</p>
-      <hr />
-      <small>Si no solicitaste esto, ignora este correo.</small>
-    </div>
-  `;
-
-    const info = await transporter.sendMail({
-        from,
-        to,
-        subject,
-        html
-    });
-
-    // Si usamos Ethereal, retornar URL de preview para debug
-    if (transporter._isTest && typeof nodemailer.getTestMessageUrl === 'function') {
-        const previewUrl = nodemailer.getTestMessageUrl(info);
-        console.log('🔹 Email de verificación (preview):', previewUrl);
-        return { info, previewUrl };
+    // Obtener preview si nodemailer provee (Ethereal)
+    let previewUrl = null;
+    try {
+        const maybe = nodemailer.getTestMessageUrl(info);
+        if (maybe) previewUrl = maybe;
+    } catch (e) {
+        // ignore
     }
 
-    return { info };
+    return { info, previewUrl };
 }
 
-module.exports = { sendVerificationEmail, getTransporter };
+module.exports = {
+    sendMail,
+    initTransport, // export por si lo quieres usar manualmente
+};

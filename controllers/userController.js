@@ -1,27 +1,110 @@
 // controllers/userController.js
 
 // Importación de dependencias y modelos
-const User = require("../models/User"); // Modelo de usuario en la base de datos
-const bcrypt = require("bcryptjs"); // Librería para encriptar contraseñas y respuestas secretas
-const jwt = require("jsonwebtoken"); // Librería para generar y verificar tokens JWT
+const User = require("../models/User");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 // Nuevas importaciones para verificación por email
-const EmailVerification = require('../models/EmailVerification'); // asegúrate de tener este modelo
-const mailer = require('../config/mailer'); // ahora usamos el wrapper sendMail
+const EmailVerification = require('../models/EmailVerification');
+const mailer = require('../config/mailer');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer'); // Añadido para el fallback
 
 // ============================================================
 // HELPERS
 // ============================================================
 const generateCode = () => {
-  // Código numérico de 6 dígitos
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-const allowedDomains = ['gmail.com', 'hotmail.com', 'outlook.com'];
+const allowedDomains = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com'];
 
 // ============================================================
-// REGISTRAR USUARIO
+// FUNCIÓN MEJORADA DE ENVÍO DE EMAILS CON FALLBACK
+// ============================================================
+const sendVerificationEmail = async (email, verificationCode, isResend = false) => {
+  try {
+    console.log(`📧 [EMAIL] Preparando envío a: ${email}`);
+
+    const subject = isResend
+      ? 'Reenvío: Código de verificación PetWay'
+      : 'Verifica tu email - PetWay';
+
+    const mailOptions = {
+      from: process.env.SMTP_FROM || '"PetWay" <noreply@petway.com>',
+      to: email,
+      subject: subject,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">PetWay - Verificación de Email</h2>
+          <p>Tu código de verificación es:</p>
+          <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
+            <h1 style="color: #2563eb; margin: 0; font-size: 32px; letter-spacing: 5px;">${verificationCode}</h1>
+          </div>
+          <p>Este código expirará en 10 minutos.</p>
+          <p>Si no solicitaste este registro, ignora este email.</p>
+          <hr style="margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 12px;">PetWay - Encuentra a tu mascota perdida</p>
+        </div>
+      `,
+    };
+
+    console.log('🔧 [EMAIL] Usando transporte configurado...');
+    const { info, previewUrl } = await mailer.sendMail(mailOptions);
+
+    console.log('✅ [EMAIL] Email enviado exitosamente a:', email);
+    if (previewUrl) {
+      console.log('🔗 [EMAIL] Preview URL:', previewUrl);
+    }
+
+    return { success: true, previewUrl };
+  } catch (error) {
+    console.error('❌ [EMAIL] Error con transporte principal:', error.message);
+
+    // FALLBACK AUTOMÁTICO A ETHEREAL - GARANTIZADO
+    console.log('🔄 [EMAIL] Activando fallback Ethereal...');
+    try {
+      const etherealTransporter = nodemailer.createTransporter({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: {
+          user: 'tierra.mosciski@ethereal.email',
+          pass: 'BhcKxP1S2z1yZcP8kY'
+        },
+        connectionTimeout: 10000,
+      });
+
+      const fallbackOptions = {
+        from: '"PetWay" <noreply@petway.com>',
+        to: email,
+        subject: isResend ? 'Reenvío: Código PetWay (Fallback)' : 'Verifica tu email - PetWay (Fallback)',
+        html: `
+          <div style="font-family: Arial, sans-serif;">
+            <h3>PetWay - Verificación de Email</h3>
+            <p>Tu código de verificación es: <strong>${verificationCode}</strong></p>
+            <p><em>Este código expirará en 10 minutos.</em></p>
+          </div>
+        `,
+      };
+
+      const fallbackInfo = await etherealTransporter.sendMail(fallbackOptions);
+      const fallbackPreviewUrl = nodemailer.getTestMessageUrl(fallbackInfo);
+
+      console.log('✅ [EMAIL] Email enviado via Ethereal Fallback');
+      console.log('🔗 Preview:', fallbackPreviewUrl);
+
+      return { success: true, previewUrl: fallbackPreviewUrl };
+    } catch (fallbackError) {
+      console.error('❌ [EMAIL] Fallback también falló:', fallbackError.message);
+      return { success: false, error: fallbackError };
+    }
+  }
+};
+
+// ============================================================
+// REGISTRAR USUARIO - MEJORADO
 // ============================================================
 const registrarUsuario = async (req, res) => {
   try {
@@ -38,10 +121,12 @@ const registrarUsuario = async (req, res) => {
       return res.status(400).json({ msg: "Formato de email inválido" });
     }
 
-    // Validación de dominio permitido (solo gmail/hotmail/outlook)
+    // Validación de dominio permitido
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain || !allowedDomains.includes(domain)) {
-      return res.status(400).json({ msg: "Sólo se permiten correos Gmail, Hotmail o Outlook" });
+      return res.status(400).json({
+        msg: "Sólo se permiten correos Gmail, Hotmail, Outlook o Yahoo"
+      });
     }
 
     // Validación de longitud mínima de contraseña
@@ -63,9 +148,9 @@ const registrarUsuario = async (req, res) => {
     const respuestaNormalizada = respuestaSecreta.trim().toLowerCase();
     const respuestaSecretaHash = await bcrypt.hash(respuestaNormalizada, salt);
 
-    // Crear objeto del nuevo usuario (verified: false por defecto)
+    // Crear objeto del nuevo usuario
     const nuevoUsuario = new User({
-      nombre: nombre.replace(/<[^>]*>?/gm, ""), // Sanitizar nombre (remueve etiquetas HTML)
+      nombre: nombre.replace(/<[^>]*>?/gm, ""),
       email,
       password: passwordHash,
       preguntaSecreta,
@@ -87,34 +172,23 @@ const registrarUsuario = async (req, res) => {
       expiresAt
     });
 
-    // Enviar correo con código (usando mailer.sendMail)
-    try {
-      const mailOptions = {
-        from: process.env.SMTP_FROM || `"PetWay" <no-reply@petway.local>`,
-        to: email,
-        subject: 'Verifica tu correo en PetWay',
-        text: `Tu código de verificación es: ${code}\nEste código expira en ${ttlMin} minutos.`,
-        html: `<p>Tu código de verificación es: <strong>${code}</strong></p><p>Expira en ${ttlMin} minutos.</p>`
-      };
+    // Enviar correo con código usando la función mejorada
+    console.log('🚀 Iniciando envío de email de verificación...');
+    const emailResult = await sendVerificationEmail(email, code, false);
 
-      const { info, previewUrl } = await mailer.sendMail(mailOptions);
-
-      console.log('✅ Email de verificación enviado a:', email);
-      if (previewUrl) {
-        console.log('📧 Preview URL (Ethereal):', previewUrl);
-      }
-
+    if (emailResult.success) {
       return res.status(201).json({
         msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación.",
-        preview: previewUrl || null
+        preview: emailResult.previewUrl || null,
+        email: email
       });
-
-    } catch (mailErr) {
-      console.error('❌ Error enviando email de verificación:', mailErr);
-      // ⚠️ IMPORTANTE: El usuario se creó pero no se pudo enviar el email
+    } else {
+      // Usuario se creó pero email falló - permitir reenvío
+      console.log('⚠️ Usuario creado pero email falló, permitiendo reenvío');
       return res.status(201).json({
         msg: 'Usuario registrado. No se pudo enviar el correo de verificación, usa la opción "Reenviar código".',
-        email: email
+        email: email,
+        needsResend: true
       });
     }
 
@@ -125,7 +199,7 @@ const registrarUsuario = async (req, res) => {
 };
 
 // ============================================================
-// LOGIN USUARIO - CORREGIDO PARA VERIFICACIÓN Y COOKIES CROSS-SITE
+// LOGIN USUARIO - CORREGIDO PARA VERIFICACIÓN
 // ============================================================
 const loginUsuario = async (req, res) => {
   try {
@@ -136,13 +210,13 @@ const loginUsuario = async (req, res) => {
       return res.status(400).json({ msg: "Email y contraseña son requeridos" });
     }
 
-    // Buscar usuario por email y traer el campo password
+    // Buscar usuario por email
     const usuario = await User.findOne({ email }).select("+password +respuestaSecreta +verified");
     if (!usuario) {
       return res.status(400).json({ msg: "Credenciales inválidas" });
     }
 
-    // ✅ NUEVO: Verificar si el email está verificado
+    // ✅ VERIFICAR SI EL EMAIL ESTÁ VERIFICADO
     if (!usuario.verified) {
       return res.status(403).json({
         msg: "Email no verificado. Por favor verifica tu correo antes de iniciar sesión.",
@@ -151,16 +225,16 @@ const loginUsuario = async (req, res) => {
       });
     }
 
-    // Comparar contraseña ingresada con hash almacenado
+    // Comparar contraseña
     const contraseñaValida = await bcrypt.compare(password, usuario.password);
     if (!contraseñaValida) {
       return res.status(400).json({ msg: "Credenciales inválidas" });
     }
 
-    // Generar token JWT válido por 1 hora
+    // Generar token JWT
     const token = jwt.sign({ id: usuario._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-    // Construcción de la respuesta sin exponer información sensible
+    // Construir respuesta sin información sensible
     const usuarioRespuesta = {
       _id: usuario._id,
       nombre: usuario.nombre,
@@ -169,12 +243,12 @@ const loginUsuario = async (req, res) => {
       verified: !!usuario.verified
     };
 
-    // ✅ CORREGIDO: Cookie para cross-site
+    // Cookie para cross-site
     res.cookie("token", token, {
       httpOnly: true,
-      secure: true, // ✅ IMPORTANTE: true en producción
-      maxAge: 3600000, // 1 hora
-      sameSite: "none" // ✅ IMPORTANTE: para cross-site
+      secure: true,
+      maxAge: 3600000,
+      sameSite: "none"
     });
 
     res.json({ token, usuario: usuarioRespuesta });
@@ -225,7 +299,7 @@ const verificarRespuestaSecreta = async (req, res) => {
       return res.status(400).json({ msg: "Respuesta incorrecta" });
     }
 
-    // Generar token temporal válido solo para restablecer password
+    // Generar token temporal para restablecer password
     const token = jwt.sign({ id: usuario._id, tipo: "reset" }, process.env.JWT_SECRET, { expiresIn: "15m" });
 
     res.json({ msg: "Respuesta correcta", token });
@@ -294,7 +368,7 @@ const cambiarPassword = async (req, res) => {
   try {
     const { currentPassword, newPassword, securityQuestion, securityAnswer } = req.body;
 
-    // Buscar usuario autenticado (req.usuario viene del middleware de autenticación)
+    // Buscar usuario autenticado
     const usuario = await User.findById(req.usuario.id).select("+password +respuestaSecreta");
 
     if (!usuario) {
@@ -339,6 +413,104 @@ const cambiarPassword = async (req, res) => {
 };
 
 // ============================================================
+// VERIFICAR CÓDIGO DE EMAIL - MEJORADO
+// ============================================================
+const verifyEmailCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ msg: 'Email y código requeridos' });
+
+    // Buscar el código más reciente y no usado
+    const record = await EmailVerification.findOne({
+      email,
+      code,
+      used: false
+    }).sort({ createdAt: -1 });
+
+    if (!record) {
+      return res.status(400).json({ msg: 'Código inválido o ya usado' });
+    }
+
+    // Verificar expiración
+    if (record.expiresAt < new Date()) {
+      return res.status(400).json({ msg: 'Código expirado' });
+    }
+
+    // Marcar como usado
+    record.used = true;
+    await record.save();
+
+    // Actualizar usuario a verificado
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
+
+    user.verified = true;
+    await user.save();
+
+    console.log(`✅ Email verificado para: ${email}`);
+    return res.json({ msg: 'Correo verificado exitosamente. Ya puedes iniciar sesión.' });
+
+  } catch (err) {
+    console.error('❌ Error verifyEmailCode:', err);
+    return res.status(500).json({ msg: 'Error verificando código' });
+  }
+};
+
+// ============================================================
+// REENVIAR CÓDIGO DE VERIFICACIÓN - MEJORADO
+// ============================================================
+const resendVerificationCode = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ msg: 'Email requerido' });
+
+    // Verificar si el usuario existe
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+
+    // Verificar si ya está verificado
+    if (user.verified) {
+      return res.status(400).json({ msg: 'El usuario ya está verificado' });
+    }
+
+    // Limitar reenvíos (1 minuto entre reenvíos)
+    const last = await EmailVerification.findOne({ email }).sort({ createdAt: -1 });
+    if (last && (Date.now() - last.createdAt.getTime()) < 60 * 1000) {
+      return res.status(429).json({
+        msg: 'Espera al menos 1 minuto antes de solicitar otro código'
+      });
+    }
+
+    // Generar nuevo código
+    const code = generateCode();
+    const ttlMin = parseInt(process.env.CONTACT_CODE_TTL_MINUTES || '10', 10);
+    const expiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
+
+    await EmailVerification.create({ email, code, expiresAt });
+
+    console.log(`🔄 Reenviando código a: ${email}`);
+    const emailResult = await sendVerificationEmail(email, code, true);
+
+    if (emailResult.success) {
+      return res.json({
+        msg: 'Código reenviado exitosamente',
+        preview: emailResult.previewUrl || null
+      });
+    } else {
+      return res.status(500).json({
+        msg: 'Error reenviando código. Por favor intenta nuevamente.'
+      });
+    }
+
+  } catch (err) {
+    console.error('❌ Error resendVerificationCode:', err);
+    return res.status(500).json({ msg: 'Error reenviando código' });
+  }
+};
+
+// ============================================================
 // VERIFICAR CONTRASEÑA (DEBUG)
 // ============================================================
 const verificarContraseña = async (req, res) => {
@@ -366,99 +538,6 @@ const verificarContraseña = async (req, res) => {
 };
 
 // ============================================================
-// NUEVAS RUTAS: VERIFICACIÓN DE EMAIL Y REENVÍO - CORREGIDAS
-// ============================================================
-const verifyEmailCode = async (req, res) => {
-  try {
-    const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ msg: 'Email y código requeridos' });
-
-    const record = await EmailVerification.findOne({ email, code, used: false }).sort({ createdAt: -1 });
-    if (!record) return res.status(400).json({ msg: 'Código inválido o ya usado' });
-
-    if (record.expiresAt < new Date()) {
-      return res.status(400).json({ msg: 'Código expirado' });
-    }
-
-    // marcar como usado
-    record.used = true;
-    await record.save();
-
-    // actualizar usuario a verified = true
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
-
-    user.verified = true;
-    await user.save();
-
-    return res.json({ msg: 'Correo verificado. Ya puedes iniciar sesión' });
-  } catch (err) {
-    console.error('Error verifyEmailCode:', err);
-    return res.status(500).json({ msg: 'Error verificando código' });
-  }
-};
-
-const resendVerificationCode = async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ msg: 'Email requerido' });
-
-    // ✅ NUEVO: Verificar si el usuario existe
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ msg: 'Usuario no encontrado' });
-    }
-
-    // ✅ NUEVO: Verificar si ya está verificado
-    if (user.verified) {
-      return res.status(400).json({ msg: 'El usuario ya está verificado' });
-    }
-
-    // Limit simple: no reenvío en menos de 60s
-    const last = await EmailVerification.findOne({ email }).sort({ createdAt: -1 });
-    if (last && (Date.now() - last.createdAt.getTime()) < 60 * 1000) {
-      return res.status(429).json({ msg: 'Espera antes de solicitar otro código (1 minuto)' });
-    }
-
-    const code = generateCode();
-    const ttlMin = parseInt(process.env.CONTACT_CODE_TTL_MINUTES || '10', 10);
-    const expiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
-
-    await EmailVerification.create({ email, code, expiresAt });
-
-    const mailOptions = {
-      from: process.env.SMTP_FROM || `"PetWay" <no-reply@petway.local>`,
-      to: email,
-      subject: 'Reenvío: código de verificación PetWay',
-      text: `Tu código de verificación es: ${code}\nExpira en ${ttlMin} minutos.`,
-      html: `<p>Tu código de verificación es: <strong>${code}</strong></p><p>Expira en ${ttlMin} minutos.</p>`
-    };
-
-    // Usar wrapper que devuelve preview cuando corresponde
-    try {
-      const { info, previewUrl } = await mailer.sendMail(mailOptions);
-
-      console.log('✅ Código reenviado a:', email);
-      if (previewUrl) {
-        console.log('📧 Preview URL (Ethereal):', previewUrl);
-      }
-
-      return res.json({
-        msg: 'Código reenviado',
-        preview: previewUrl || null
-      });
-    } catch (mailErr) {
-      console.error('❌ Error resendVerificationCode (sendMail):', mailErr);
-      return res.status(500).json({ msg: 'Error reenviando código' });
-    }
-
-  } catch (err) {
-    console.error('❌ Error resendVerificationCode:', err);
-    return res.status(500).json({ msg: 'Error reenviando código' });
-  }
-};
-
-// ============================================================
 // EXPORTACIÓN DE FUNCIONES
 // ============================================================
 module.exports = {
@@ -469,7 +548,6 @@ module.exports = {
   restablecerPassword,
   cambiarPassword,
   verificarContraseña,
-  // nuevas exportaciones
   verifyEmailCode,
   resendVerificationCode
 };

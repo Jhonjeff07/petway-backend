@@ -1,87 +1,60 @@
-// config/mailer.js
 const nodemailer = require('nodemailer');
 
-let transport; // nodemailer transport instance
+console.log('🔧 [MAILER] Inicializando transporte de email...');
 
-/**
- * Inicializa el transportador según las variables de entorno.
- * - Si se detecta SMTP_HOST/SMTP_USER/SMTP_PASS -> usa esos (producción).
- * - Si no -> crea una cuenta Ethereal (dev) y retorna el transport.
- */
-async function initTransport() {
-    if (transport) return transport;
+// Configuración directa y simple - ELIMINADA LA COMPLEJIDAD
+const transporter = nodemailer.createTransporter({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+    },
+    connectionTimeout: 15000, // 15 segundos máximo
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
+});
 
-    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE } = process.env;
-
-    if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
-        // Configuración SMTP real (production)
-        transport = nodemailer.createTransport({
-            host: SMTP_HOST,
-            port: parseInt(SMTP_PORT || '587', 10),
-            secure: (SMTP_SECURE === 'true'), // true para 465, false para 587
-            auth: {
-                user: SMTP_USER,
-                pass: SMTP_PASS,
-            },
-            tls: {
-                // Permitir conexiones seguras en algunos entornos (opcional)
-                rejectUnauthorized: false,
-            },
+// Verificar conexión inmediatamente
+transporter.verify(function (error, success) {
+    if (error) {
+        console.error('❌ [MAILER] Error verificando SMTP:', error.message);
+        console.log('🔧 [MAILER] Configuración usada:', {
+            host: process.env.SMTP_HOST,
+            port: process.env.SMTP_PORT,
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS ? '✅ Configurada' : '❌ Faltante',
+            secure: process.env.SMTP_SECURE
         });
+    } else {
+        console.log('✅ [MAILER] Servidor SMTP listo para enviar emails');
+    }
+});
 
-        // Verificar (no obligatorio, pero útil)
-        try {
-            await transport.verify();
-            console.log('✅ SMTP transport listo (producción)');
-        } catch (err) {
-            console.warn('⚠️ Warning: no se pudo verificar SMTP real:', err.message);
+// Función simple de envío
+const sendMail = async (mailOptions) => {
+    try {
+        console.log(`📧 [MAILER] Intentando enviar email a: ${mailOptions.to}`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ [MAILER] Email enviado exitosamente:', info.messageId);
+
+        // Solo para Ethereal
+        if (process.env.SMTP_HOST === 'smtp.ethereal.email') {
+            const previewUrl = nodemailer.getTestMessageUrl(info);
+            if (previewUrl) {
+                console.log('🔗 [MAILER] Preview URL:', previewUrl);
+                return { info, previewUrl };
+            }
         }
 
-        return transport;
+        return { info, previewUrl: null };
+    } catch (error) {
+        console.error('❌ [MAILER] Error enviando email:', error.message);
+        throw error;
     }
-
-    // Si no hay SMTP configurado: usar Ethereal (solo dev/test)
-    console.log('ℹ️ No SMTP configurado. Creando cuenta Ethereal para desarrollo/test...');
-    const testAccount = await nodemailer.createTestAccount();
-
-    transport = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: {
-            user: testAccount.user,
-            pass: testAccount.pass,
-        },
-    });
-
-    // Verified log
-    console.log('✅ Ethereal transport listo (dev). user:', testAccount.user);
-    return transport;
-}
-
-/**
- * sendMail wrapper:
- * - Inicializa transport si es necesario
- * - Envía el mail
- * - Devuelve { info, previewUrl }
- */
-async function sendMail(mailOptions) {
-    const t = await initTransport();
-    const info = await t.sendMail(mailOptions);
-
-    // Obtener preview si nodemailer provee (Ethereal)
-    let previewUrl = null;
-    try {
-        const maybe = nodemailer.getTestMessageUrl(info);
-        if (maybe) previewUrl = maybe;
-    } catch (e) {
-        // ignore
-    }
-
-    return { info, previewUrl };
-}
+};
 
 module.exports = {
-    sendMail,
-    initTransport, // export por si lo quieres usar manualmente
+    sendMail
 };

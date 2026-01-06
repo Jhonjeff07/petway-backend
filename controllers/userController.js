@@ -21,7 +21,7 @@ const generateCode = () => {
 const allowedDomains = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com'];
 
 // ============================================================
-// FUNCIÓN MEJORADA DE ENVÍO DE EMAILS CON FALLBACK
+// FUNCIÓN MEJORADA DE ENVÍO DE EMAILS CON FALLBACK - CORREGIDA
 // ============================================================
 const sendVerificationEmail = async (email, verificationCode, isResend = false) => {
   try {
@@ -42,7 +42,7 @@ const sendVerificationEmail = async (email, verificationCode, isResend = false) 
           <div style="background-color: #f3f4f6; padding: 20px; text-align: center; margin: 20px 0;">
             <h1 style="color: #2563eb; margin: 0; font-size: 32px; letter-spacing: 5px;">${verificationCode}</h1>
           </div>
-          <p>Este código expirará en 10 minutos.</p>
+          <p>Este código expirará en ${process.env.CONTACT_CODE_TTL_MINUTES || 10} minutos.</p>
           <p>Si no solicitaste este registro, ignora este email.</p>
           <hr style="margin: 20px 0;">
           <p style="color: #6b7280; font-size: 12px;">PetWay - Encuentra a tu mascota perdida</p>
@@ -50,8 +50,13 @@ const sendVerificationEmail = async (email, verificationCode, isResend = false) 
       `,
     };
 
-    console.log('🔧 [EMAIL] Usando transporte configurado...');
-    const { info, previewUrl } = await mailer.sendMail(mailOptions);
+    console.log('🔧 [EMAIL] Usando transporte configurado (principal)...');
+
+    // mailer.sendMail está definido en config/mailer.js y devuelve { info, previewUrl } o lanza error
+    const result = await mailer.sendMail(mailOptions);
+
+    // result puede contener previewUrl (si el transporter lo proporciona)
+    const previewUrl = result && result.previewUrl ? result.previewUrl : null;
 
     console.log('✅ [EMAIL] Email enviado exitosamente a:', email);
     if (previewUrl) {
@@ -60,44 +65,47 @@ const sendVerificationEmail = async (email, verificationCode, isResend = false) 
 
     return { success: true, previewUrl };
   } catch (error) {
-    console.error('❌ [EMAIL] Error con transporte principal:', error.message);
+    // En caso de fallo con el transporte principal, intentamos fallback con nodemailer.createTestAccount()
+    console.error('❌ [EMAIL] Error con transporte principal:', error && error.message ? error.message : error);
 
-    // FALLBACK AUTOMÁTICO A ETHEREAL - GARANTIZADO
-    console.log('🔄 [EMAIL] Activando fallback Ethereal...');
+    // FALLBACK AUTOMÁTICO A ETHEREAL (createTestAccount) - más seguro que credenciales hardcodeadas
+    console.log('🔄 [EMAIL] Activando fallback Ethereal (createTestAccount)...');
     try {
-      const etherealTransporter = nodemailer.createTransporter({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
+      const testAccount = await nodemailer.createTestAccount();
+
+      const etherealTransporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
         auth: {
-          user: 'tierra.mosciski@ethereal.email',
-          pass: 'BhcKxP1S2z1yZcP8kY'
-        },
-        connectionTimeout: 10000,
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
       });
 
       const fallbackOptions = {
         from: '"PetWay" <noreply@petway.com>',
         to: email,
-        subject: isResend ? 'Reenvío: Código PetWay (Fallback)' : 'Verifica tu email - PetWay (Fallback)',
+        subject: isResend ? 'Reenvío: Código PetWay (TEST)' : 'Verifica tu email - PetWay (TEST)',
         html: `
           <div style="font-family: Arial, sans-serif;">
             <h3>PetWay - Verificación de Email</h3>
-            <p>Tu código de verificación es: <strong>${verificationCode}</strong></p>
-            <p><em>Este código expirará en 10 minutos.</em></p>
+            <p>Tu código de verificación es:</p>
+            <h2 style="letter-spacing: 6px;">${verificationCode}</h2>
+            <p><em>Este código expirará en ${process.env.CONTACT_CODE_TTL_MINUTES || 10} minutos.</em></p>
           </div>
-        `,
+        `
       };
 
-      const fallbackInfo = await etherealTransporter.sendMail(fallbackOptions);
-      const fallbackPreviewUrl = nodemailer.getTestMessageUrl(fallbackInfo);
+      const info = await etherealTransporter.sendMail(fallbackOptions);
+      const previewUrl = nodemailer.getTestMessageUrl(info);
 
       console.log('✅ [EMAIL] Email enviado via Ethereal Fallback');
-      console.log('🔗 Preview:', fallbackPreviewUrl);
+      console.log('🔗 Preview (Ethereal):', previewUrl);
 
-      return { success: true, previewUrl: fallbackPreviewUrl };
+      return { success: true, previewUrl };
     } catch (fallbackError) {
-      console.error('❌ [EMAIL] Fallback también falló:', fallbackError.message);
+      console.error('❌ [EMAIL] Fallback también falló:', fallbackError && fallbackError.message ? fallbackError.message : fallbackError);
       return { success: false, error: fallbackError };
     }
   }
@@ -179,7 +187,7 @@ const registrarUsuario = async (req, res) => {
     if (emailResult.success) {
       return res.status(201).json({
         msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación.",
-        preview: emailResult.previewUrl || null,
+        preview: emailResult.previewUrl || emailResult.preview || null,
         email: email
       });
     } else {
@@ -193,7 +201,7 @@ const registrarUsuario = async (req, res) => {
     }
 
   } catch (error) {
-    console.error("❌ Error en registrarUsuario:", error);
+    console.error("❌ Error en registrarUsuario:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
@@ -243,18 +251,19 @@ const loginUsuario = async (req, res) => {
       verified: !!usuario.verified
     };
 
-    // Cookie para cross-site
+    // Cookie para cross-site: ajusta secure/sameSite según entorno para evitar problemas en local
+    const isProd = process.env.NODE_ENV === 'production';
     res.cookie("token", token, {
       httpOnly: true,
-      secure: true,
-      maxAge: 3600000,
-      sameSite: "none"
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 3600000
     });
 
     res.json({ token, usuario: usuarioRespuesta });
 
   } catch (error) {
-    console.error("❌ Error en loginUsuario:", error);
+    console.error("❌ Error en loginUsuario:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
@@ -274,7 +283,7 @@ const obtenerPreguntaSecreta = async (req, res) => {
     res.json({ preguntaSecreta: usuario.preguntaSecreta });
 
   } catch (error) {
-    console.error("❌ Error en obtenerPreguntaSecreta:", error);
+    console.error("❌ Error en obtenerPreguntaSecreta:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
@@ -305,7 +314,7 @@ const verificarRespuestaSecreta = async (req, res) => {
     res.json({ msg: "Respuesta correcta", token });
 
   } catch (error) {
-    console.error("❌ Error en verificarRespuestaSecreta:", error);
+    console.error("❌ Error en verificarRespuestaSecreta:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
@@ -347,7 +356,7 @@ const restablecerPassword = async (req, res) => {
     res.json({ msg: "Contraseña restablecida con éxito" });
 
   } catch (error) {
-    console.error("❌ Error en restablecerPassword:", error);
+    console.error("❌ Error en restablecerPassword:", error && error.message ? error.message : error);
 
     // Manejo de errores de token JWT
     if (error.name === "JsonWebTokenError") {
@@ -407,7 +416,7 @@ const cambiarPassword = async (req, res) => {
     res.json({ msg: "Datos actualizados correctamente" });
 
   } catch (error) {
-    console.error("❌ Error en cambiarPassword:", error);
+    console.error("❌ Error en cambiarPassword:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
@@ -451,7 +460,7 @@ const verifyEmailCode = async (req, res) => {
     return res.json({ msg: 'Correo verificado exitosamente. Ya puedes iniciar sesión.' });
 
   } catch (err) {
-    console.error('❌ Error verifyEmailCode:', err);
+    console.error('❌ Error verifyEmailCode:', err && err.message ? err.message : err);
     return res.status(500).json({ msg: 'Error verificando código' });
   }
 };
@@ -496,7 +505,7 @@ const resendVerificationCode = async (req, res) => {
     if (emailResult.success) {
       return res.json({
         msg: 'Código reenviado exitosamente',
-        preview: emailResult.previewUrl || null
+        preview: emailResult.previewUrl || emailResult.preview || null
       });
     } else {
       return res.status(500).json({
@@ -505,7 +514,7 @@ const resendVerificationCode = async (req, res) => {
     }
 
   } catch (err) {
-    console.error('❌ Error resendVerificationCode:', err);
+    console.error('❌ Error resendVerificationCode:', err && err.message ? err.message : err);
     return res.status(500).json({ msg: 'Error reenviando código' });
   }
 };

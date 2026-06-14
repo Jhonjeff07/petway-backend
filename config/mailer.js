@@ -1,29 +1,32 @@
 // config/mailer.js
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-console.log('🔧 [MAILER] Inicializando Resend...');
+console.log('🔧 [MAILER] Inicializando Gmail SMTP...');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: false,
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    }
+});
 
-const sendMail = async ({ to, subject, html, text }) => {
+transporter.verify((err) => {
+    if (err) {
+        console.error('❌ [MAILER] Error verificando SMTP:', err.message);
+    } else {
+        console.log('✅ [MAILER] Gmail SMTP listo para enviar emails');
+    }
+});
+
+const sendMail = async (mailOptions) => {
     try {
-        console.log(`📧 [MAILER] Enviando email a: ${to}`);
-
-        const { data, error } = await resend.emails.send({
-            from: 'PetWay <onboarding@resend.dev>',
-            to,
-            subject,
-            html: html || `<p>${text}</p>`
-        });
-
-        if (error) {
-            console.error('❌ [MAILER] Error de Resend:', error);
-            throw new Error(error.message);
-        }
-
-        console.log('✅ [MAILER] Email enviado. ID:', data.id);
-        return { info: data, previewUrl: null };
-
+        console.log(`📧 [MAILER] Enviando email a: ${mailOptions.to}`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ [MAILER] Email enviado:', info.messageId);
+        return { info, previewUrl: null };
     } catch (error) {
         console.error('❌ [MAILER] Error enviando email:', error.message);
         throw error;
@@ -31,6 +34,6 @@ const sendMail = async ({ to, subject, html, text }) => {
 };
 
 module.exports = {
-    sendMail,
-    transporter: { sendMail }
+    transporter,
+    sendMail
 };

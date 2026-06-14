@@ -1,7 +1,7 @@
 // config/mailer.js
 const nodemailer = require('nodemailer');
 
-console.log('🔧 [MAILER] Inicializando Gmail SMTP...');
+console.log('🔧 [MAILER] Inicializando Brevo SMTP...');
 
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -17,7 +17,7 @@ transporter.verify((err) => {
     if (err) {
         console.error('❌ [MAILER] Error verificando SMTP:', err.message);
     } else {
-        console.log('✅ [MAILER] Gmail SMTP listo para enviar emails');
+        console.log('✅ [MAILER] Brevo SMTP listo para enviar emails');
     }
 });
 

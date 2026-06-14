@@ -1,39 +1,49 @@
 // config/mailer.js
-const nodemailer = require('nodemailer');
+const https = require('https');
 
-console.log('🔧 [MAILER] Inicializando Brevo SMTP...');
+console.log('🔧 [MAILER] Inicializando Brevo API...');
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    }
-});
+const sendMail = async ({ to, subject, html, text }) => {
+    return new Promise((resolve, reject) => {
+        const body = JSON.stringify({
+            sender: { name: 'PetWay', email: process.env.SMTP_FROM },
+            to: [{ email: to }],
+            subject: subject,
+            htmlContent: html || `<p>${text}</p>`
+        });
 
-transporter.verify((err) => {
-    if (err) {
-        console.error('❌ [MAILER] Error verificando SMTP:', err.message);
-    } else {
-        console.log('✅ [MAILER] Brevo SMTP listo para enviar emails');
-    }
-});
+        const options = {
+            hostname: 'api.brevo.com',
+            path: '/v3/smtp/email',
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'content-type': 'application/json',
+                'api-key': process.env.BREVO_API_KEY
+            }
+        };
 
-const sendMail = async (mailOptions) => {
-    try {
-        console.log(`📧 [MAILER] Enviando email a: ${mailOptions.to}`);
-        const info = await transporter.sendMail(mailOptions);
-        console.log('✅ [MAILER] Email enviado:', info.messageId);
-        return { info, previewUrl: null };
-    } catch (error) {
-        console.error('❌ [MAILER] Error enviando email:', error.message);
-        throw error;
-    }
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                if (res.statusCode === 201) {
+                    console.log('✅ [MAILER] Email enviado via Brevo API');
+                    resolve({ info: JSON.parse(data), previewUrl: null });
+                } else {
+                    console.error('❌ [MAILER] Error Brevo API:', data);
+                    reject(new Error(`Brevo API error: ${data}`));
+                }
+            });
+        });
+
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
 };
 
 module.exports = {
-    transporter,
-    sendMail
+    sendMail,
+    transporter: { sendMail }
 };

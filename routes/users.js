@@ -15,7 +15,6 @@ const {
 } = require('../controllers/userController');
 const auth = require('../middleware/authMiddleware');
 
-// Helper para manejar validaciones
 const validar = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -24,15 +23,12 @@ const validar = (req, res, next) => {
   next();
 };
 
-// Registro (mantengo la ruta '/' tal como estaba)
 router.post(
   '/',
   [
     body('nombre').trim().notEmpty().withMessage('El nombre es obligatorio').escape(),
     body('email').isEmail().withMessage('El email es inválido').normalizeEmail(),
-    body('password')
-      .isLength({ min: 8 })
-      .withMessage('La contraseña debe tener al menos 8 caracteres'),
+    body('password').isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres'),
     body('preguntaSecreta').trim().notEmpty().withMessage('La pregunta secreta es obligatoria').escape(),
     body('respuestaSecreta').trim().notEmpty().withMessage('La respuesta secreta es obligatoria').escape()
   ],
@@ -40,7 +36,6 @@ router.post(
   registrarUsuario
 );
 
-// Login
 router.post(
   '/login',
   [
@@ -51,7 +46,6 @@ router.post(
   loginUsuario
 );
 
-// Obtener pregunta secreta
 router.post(
   '/obtener-pregunta',
   [body('email').isEmail().withMessage('El email es inválido').normalizeEmail()],
@@ -59,7 +53,6 @@ router.post(
   obtenerPreguntaSecreta
 );
 
-// Verificar respuesta secreta
 router.post(
   '/verificar-respuesta',
   [
@@ -70,29 +63,22 @@ router.post(
   verificarRespuestaSecreta
 );
 
-// 🔹 Restablecer password (olvidada, con token)
 router.post(
   '/restablecer-password',
   [
     body('token').notEmpty().withMessage('El token es requerido'),
-    body('nuevaPassword')
-      .isLength({ min: 8 })
-      .withMessage('La nueva contraseña debe tener al menos 8 caracteres')
+    body('nuevaPassword').isLength({ min: 8 }).withMessage('La nueva contraseña debe tener al menos 8 caracteres')
   ],
   validar,
   restablecerPassword
 );
 
-// 🔹 Cambiar password (usuario autenticado)
 router.post(
   '/cambiar-password',
   auth,
   [
     body('currentPassword').notEmpty().withMessage('La contraseña actual es obligatoria'),
-    body('newPassword')
-      .optional()
-      .isLength({ min: 8 })
-      .withMessage('La nueva contraseña debe tener al menos 8 caracteres'),
+    body('newPassword').optional().isLength({ min: 8 }).withMessage('La nueva contraseña debe tener al menos 8 caracteres'),
     body('securityQuestion').optional().trim(),
     body('securityAnswer').optional().trim()
   ],
@@ -100,9 +86,6 @@ router.post(
   cambiarPassword
 );
 
-// ========================
-// NUEVAS RUTAS: VERIFICACIÓN / REENVÍO
-// ========================
 router.post(
   '/verify-email',
   [
@@ -115,11 +98,19 @@ router.post(
 
 router.post(
   '/resend-verification',
-  [
-    body('email').isEmail().withMessage('El email es inválido').normalizeEmail()
-  ],
+  [body('email').isEmail().withMessage('El email es inválido').normalizeEmail()],
   validar,
   resendVerificationCode
 );
+
+// ✅ NUEVO: Logout - limpiar cookie
+router.post('/logout', (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  });
+  res.json({ msg: 'Sesión cerrada' });
+});
 
 module.exports = router;

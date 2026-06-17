@@ -1,9 +1,8 @@
 // controllers/mascotaController.js
-const Mascota = require('../models/Mascota'); // <-- usar minúsculas para evitar problemas en Linux
+const Mascota = require('../models/Mascota');
 const cloudinary = require('../config/cloudinary');
 const streamifier = require('streamifier');
 
-// Función para sanitizar entradas
 const sanitizeInput = (value) => {
     if (typeof value === 'string') {
         return value.replace(/<[^>]*>?/gm, '').trim();
@@ -11,13 +10,11 @@ const sanitizeInput = (value) => {
     return value;
 };
 
-// Normalizar teléfono: dejar solo + y dígitos
 const sanitizePhone = (phone) => {
     if (!phone) return '';
     return String(phone).replace(/[^\d+]/g, '');
 };
 
-// Helper: subir buffer a Cloudinary
 const uploadBufferToCloudinary = (buffer, folder = 'petway') => {
     return new Promise((resolve, reject) => {
         const upload_stream = cloudinary.uploader.upload_stream(
@@ -31,26 +28,21 @@ const uploadBufferToCloudinary = (buffer, folder = 'petway') => {
     });
 };
 
-// Helper: redondear coordenadas (privacidad pública)
 const roundCoord = (num, decimals = 3) => {
     if (typeof num !== 'number') return num;
     const factor = Math.pow(10, decimals);
     return Math.round(num * factor) / factor;
 };
 
-// Helper: crear versión "publica" de la mascota (con ubicación aproximada)
 const maskLocationIfNeeded = (mascotaObj, requesterId) => {
     try {
         if (!mascotaObj) return mascotaObj;
         if (!mascotaObj.ubicacion || !Array.isArray(mascotaObj.ubicacion.coordinates)) {
             return mascotaObj;
         }
-
         const ownerId = mascotaObj.usuario && mascotaObj.usuario._id ? String(mascotaObj.usuario._id) : null;
         const isOwner = requesterId && ownerId && String(requesterId) === String(ownerId);
-
         if (isOwner) return mascotaObj;
-
         const [lng, lat] = mascotaObj.ubicacion.coordinates;
         const masked = { ...mascotaObj };
         masked.ubicacion = {
@@ -64,14 +56,9 @@ const maskLocationIfNeeded = (mascotaObj, requesterId) => {
     }
 };
 
-/* -----------------------
-   CONTROLADORES
-   ----------------------- */
-
 // Crear mascota
 exports.crearMascota = async (req, res) => {
     try {
-        // Verificar autenticación básica (ruta debe usar verificarToken)
         if (!req.usuario || !req.usuario.id) {
             return res.status(401).json({ msg: 'No autorizado' });
         }
@@ -79,7 +66,6 @@ exports.crearMascota = async (req, res) => {
         const { nombre, tipo, raza, edad, descripcion, ciudad } = req.body;
         let { telefono, lat, lng } = req.body;
 
-        // Validación mínima
         if (typeof lat === 'undefined' || typeof lng === 'undefined') {
             return res.status(400).json({ msg: 'Latitud y longitud son requeridas' });
         }
@@ -108,7 +94,7 @@ exports.crearMascota = async (req, res) => {
 
         const ubicacion = {
             type: 'Point',
-            coordinates: [lng, lat] // [lng, lat]
+            coordinates: [lng, lat]
         };
 
         const mascota = new Mascota({
@@ -122,7 +108,9 @@ exports.crearMascota = async (req, res) => {
             fotoUrl,
             fotoPublicId,
             usuario: req.usuario.id,
-            ubicacion
+            ubicacion,
+            // ✅ destacada solo si el usuario es premium y lo solicitó
+            destacada: req.usuario.premium && req.body.destacada === 'true'
         });
 
         await mascota.save();
@@ -133,18 +121,17 @@ exports.crearMascota = async (req, res) => {
     }
 };
 
-// Obtener todas las mascotas (public) -> aplica máscara de ubicación para no propietarios
+// Obtener todas las mascotas — destacadas primero
 exports.obtenerMascotas = async (req, res) => {
     try {
         const requesterId = req.usuario && req.usuario.id ? req.usuario.id : null;
         const mascotasDocs = await Mascota.find()
             .populate('usuario', 'nombre _id')
-            .sort({ createdAt: -1 })
+            .sort({ destacada: -1, createdAt: -1 }) // ✅ destacadas primero
             .limit(500);
 
         const mascotas = mascotasDocs.map(m => {
             const obj = m.toObject ? m.toObject() : m;
-            // ocultar teléfono si requester no está autenticado
             if (!req.usuario) {
                 delete obj.telefono;
             }
@@ -158,7 +145,7 @@ exports.obtenerMascotas = async (req, res) => {
     }
 };
 
-// Obtener mascota por ID (mask si no es owner)
+// Obtener mascota por ID
 exports.obtenerMascotaPorId = async (req, res) => {
     try {
         const requesterId = req.usuario && req.usuario.id ? req.usuario.id : null;
@@ -171,7 +158,6 @@ exports.obtenerMascotaPorId = async (req, res) => {
 
         const mascotaObj = mascotaDoc.toObject();
 
-        // Ocultar teléfono si la petición no viene de un usuario autenticado
         if (!req.usuario) {
             delete mascotaObj.telefono;
         }
@@ -184,7 +170,7 @@ exports.obtenerMascotaPorId = async (req, res) => {
     }
 };
 
-// Actualizar mascota (incluye posible actualización de lat/lng)
+// Actualizar mascota
 exports.actualizarMascota = async (req, res) => {
     try {
         const mascota = await Mascota.findById(req.params.id);
@@ -226,7 +212,6 @@ exports.actualizarMascota = async (req, res) => {
                     console.warn('No se pudo eliminar imagen anterior:', err.message);
                 }
             }
-
             try {
                 const result = await uploadBufferToCloudinary(req.file.buffer, 'petway');
                 updateData.fotoUrl = result.secure_url;
@@ -317,9 +302,7 @@ exports.obtenerMisMascotas = async (req, res) => {
     }
 };
 
-// =====================
-// BÚSQUEDA POR PROXIMIDAD
-// GET /api/mascotas/near?lat=...&lng=...&radius=meters
+// Búsqueda por proximidad
 exports.obtenerMascotasNear = async (req, res) => {
     try {
         const { lat, lng, radius = 5000 } = req.query;
@@ -337,7 +320,6 @@ exports.obtenerMascotasNear = async (req, res) => {
 
         const center = [lngN, latN];
 
-        // $nearSphere requiere índice 2dsphere en el campo ubicacion
         const mascotasDocs = await Mascota.find({
             ubicacion: {
                 $nearSphere: {
@@ -352,7 +334,6 @@ exports.obtenerMascotasNear = async (req, res) => {
         const requesterId = req.usuario && req.usuario.id ? req.usuario.id : null;
         const mascotas = mascotasDocs.map((m) => {
             const obj = m.toObject ? m.toObject() : m;
-            // ocultar teléfono si requester no está autenticado
             if (!req.usuario) {
                 delete obj.telefono;
             }

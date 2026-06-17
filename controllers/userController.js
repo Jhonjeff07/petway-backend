@@ -8,22 +8,15 @@ const EmailVerification = require('../models/EmailVerification');
 const mailer = require('../config/mailer');
 const crypto = require('crypto');
 
-// ============================================================
-// HELPERS
-// ============================================================
 const generateCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 const allowedDomains = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com'];
 
-// ============================================================
-// FUNCIÓN DE ENVÍO DE EMAILS
-// ============================================================
 const sendVerificationEmail = async (email, verificationCode, isResend = false) => {
   try {
     console.log(`📧 [EMAIL] Preparando envío a: ${email}`);
-
     const subject = isResend
       ? 'Reenvío: Código de verificación PetWay'
       : 'Verifica tu email - PetWay';
@@ -50,10 +43,8 @@ const sendVerificationEmail = async (email, verificationCode, isResend = false) 
     console.log('🔧 [EMAIL] Usando transporte configurado...');
     const result = await mailer.sendMail(mailOptions);
     const previewUrl = result && result.previewUrl ? result.previewUrl : null;
-
     console.log('✅ [EMAIL] Email enviado exitosamente a:', email);
     if (previewUrl) console.log('🔗 [EMAIL] Preview URL:', previewUrl);
-
     return { success: true, previewUrl };
   } catch (error) {
     console.error('❌ [EMAIL] Error enviando email:', error && error.message ? error.message : error);
@@ -61,9 +52,6 @@ const sendVerificationEmail = async (email, verificationCode, isResend = false) 
   }
 };
 
-// ============================================================
-// REGISTRAR USUARIO
-// ============================================================
 const registrarUsuario = async (req, res) => {
   try {
     const { nombre, email, password, preguntaSecreta, respuestaSecreta } = req.body;
@@ -79,9 +67,7 @@ const registrarUsuario = async (req, res) => {
 
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain || !allowedDomains.includes(domain)) {
-      return res.status(400).json({
-        msg: "Sólo se permiten correos Gmail, Hotmail, Outlook o Yahoo"
-      });
+      return res.status(400).json({ msg: "Sólo se permiten correos Gmail, Hotmail, Outlook o Yahoo" });
     }
 
     if (password.length < 8) {
@@ -133,9 +119,6 @@ const registrarUsuario = async (req, res) => {
   }
 };
 
-// ============================================================
-// LOGIN USUARIO
-// ============================================================
 const loginUsuario = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -144,7 +127,11 @@ const loginUsuario = async (req, res) => {
       return res.status(400).json({ msg: "Email y contraseña son requeridos" });
     }
 
-    const usuario = await User.findOne({ email }).select("+password +respuestaSecreta +verified");
+    // ✅ CAMBIO: agregado +premium y .lean() para forzar lectura directa de MongoDB
+    const usuario = await User.findOne({ email })
+      .select("+password +respuestaSecreta +verified +premium")
+      .lean();
+
     if (!usuario) {
       return res.status(400).json({ msg: "Credenciales inválidas" });
     }
@@ -164,7 +151,6 @@ const loginUsuario = async (req, res) => {
 
     const token = jwt.sign({ id: usuario._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-    // ✅ premium incluido en la respuesta
     const usuarioRespuesta = {
       _id: usuario._id,
       nombre: usuario.nombre,
@@ -190,118 +176,84 @@ const loginUsuario = async (req, res) => {
   }
 };
 
-// ============================================================
-// OBTENER PREGUNTA SECRETA
-// ============================================================
 const obtenerPreguntaSecreta = async (req, res) => {
   try {
     const { email } = req.body;
-
     const usuario = await User.findOne({ email });
     if (!usuario) {
       return res.status(404).json({ msg: "No existe un usuario con ese correo" });
     }
-
     res.json({ preguntaSecreta: usuario.preguntaSecreta });
-
   } catch (error) {
     console.error("❌ Error en obtenerPreguntaSecreta:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
 
-// ============================================================
-// VERIFICAR RESPUESTA SECRETA
-// ============================================================
 const verificarRespuestaSecreta = async (req, res) => {
   try {
     const { email, respuesta } = req.body;
-
     const usuario = await User.findOne({ email }).select("+respuestaSecreta");
     if (!usuario) {
       return res.status(404).json({ msg: "Usuario no encontrado" });
     }
-
     const respuestaNormalizada = respuesta.trim().toLowerCase();
     const esRespuestaCorrecta = await bcrypt.compare(respuestaNormalizada, usuario.respuestaSecreta);
-
     if (!esRespuestaCorrecta) {
       return res.status(400).json({ msg: "Respuesta incorrecta" });
     }
-
     const token = jwt.sign({ id: usuario._id, tipo: "reset" }, process.env.JWT_SECRET, { expiresIn: "15m" });
-
     res.json({ msg: "Respuesta correcta", token });
-
   } catch (error) {
     console.error("❌ Error en verificarRespuestaSecreta:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
 
-// ============================================================
-// RESTABLECER PASSWORD
-// ============================================================
 const restablecerPassword = async (req, res) => {
   try {
     const { token, nuevaPassword } = req.body;
-
     if (!token || !nuevaPassword) {
       return res.status(400).json({ msg: "Token y nueva contraseña son requeridos" });
     }
     if (nuevaPassword.length < 8) {
       return res.status(400).json({ msg: "La contraseña debe tener al menos 8 caracteres" });
     }
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (decoded.tipo !== "reset") {
       return res.status(400).json({ msg: "Token inválido" });
     }
-
     const usuario = await User.findById(decoded.id);
     if (!usuario) {
       return res.status(404).json({ msg: "Usuario no encontrado" });
     }
-
     const salt = await bcrypt.genSalt(10);
     const newHash = await bcrypt.hash(nuevaPassword, salt);
-
     await User.updateOne({ _id: decoded.id }, { $set: { password: newHash } });
-
     res.json({ msg: "Contraseña restablecida con éxito" });
-
   } catch (error) {
     console.error("❌ Error en restablecerPassword:", error && error.message ? error.message : error);
-
     if (error.name === "JsonWebTokenError") {
       return res.status(400).json({ msg: "Token inválido" });
     }
     if (error.name === "TokenExpiredError") {
       return res.status(400).json({ msg: "Token expirado" });
     }
-
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
 
-// ============================================================
-// CAMBIAR PASSWORD Y PREGUNTA SECRETA
-// ============================================================
 const cambiarPassword = async (req, res) => {
   try {
     const { currentPassword, newPassword, securityQuestion, securityAnswer } = req.body;
-
     const usuario = await User.findById(req.usuario.id).select("+password +respuestaSecreta");
-
     if (!usuario) {
       return res.status(404).json({ msg: "Usuario no encontrado" });
     }
-
     const contraseñaValida = await bcrypt.compare(currentPassword, usuario.password);
     if (!contraseñaValida) {
       return res.status(400).json({ msg: "Contraseña actual incorrecta" });
     }
-
     if (newPassword) {
       if (newPassword.length < 8) {
         return res.status(400).json({ msg: "La nueva contraseña debe tener al menos 8 caracteres" });
@@ -310,7 +262,6 @@ const cambiarPassword = async (req, res) => {
       const newHash = await bcrypt.hash(newPassword, salt);
       await User.updateOne({ _id: req.usuario.id }, { $set: { password: newHash } });
     }
-
     if (securityQuestion && securityAnswer) {
       const respuestaNormalizada = securityAnswer.trim().toLowerCase();
       const salt = await bcrypt.genSalt(10);
@@ -320,129 +271,88 @@ const cambiarPassword = async (req, res) => {
         { $set: { preguntaSecreta: securityQuestion, respuestaSecreta: respuestaHash } }
       );
     }
-
     res.json({ msg: "Datos actualizados correctamente" });
-
   } catch (error) {
     console.error("❌ Error en cambiarPassword:", error && error.message ? error.message : error);
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
 
-// ============================================================
-// VERIFICAR CÓDIGO DE EMAIL
-// ============================================================
 const verifyEmailCode = async (req, res) => {
   try {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ msg: 'Email y código requeridos' });
-
-    const record = await EmailVerification.findOne({
-      email,
-      code,
-      used: false
-    }).sort({ createdAt: -1 });
-
+    const record = await EmailVerification.findOne({ email, code, used: false }).sort({ createdAt: -1 });
     if (!record) {
       return res.status(400).json({ msg: 'Código inválido o ya usado' });
     }
-
     if (record.expiresAt < new Date()) {
       return res.status(400).json({ msg: 'Código expirado' });
     }
-
     record.used = true;
     await record.save();
-
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
-
     user.verified = true;
     await user.save();
-
     console.log(`✅ Email verificado para: ${email}`);
     return res.json({ msg: 'Correo verificado exitosamente. Ya puedes iniciar sesión.' });
-
   } catch (err) {
     console.error('❌ Error verifyEmailCode:', err && err.message ? err.message : err);
     return res.status(500).json({ msg: 'Error verificando código' });
   }
 };
 
-// ============================================================
-// REENVIAR CÓDIGO DE VERIFICACIÓN
-// ============================================================
 const resendVerificationCode = async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ msg: 'Email requerido' });
-
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ msg: 'Usuario no encontrado' });
     }
-
     if (user.verified) {
       return res.status(400).json({ msg: 'El usuario ya está verificado' });
     }
-
     const last = await EmailVerification.findOne({ email }).sort({ createdAt: -1 });
     if (last && (Date.now() - last.createdAt.getTime()) < 60 * 1000) {
-      return res.status(429).json({
-        msg: 'Espera al menos 1 minuto antes de solicitar otro código'
-      });
+      return res.status(429).json({ msg: 'Espera al menos 1 minuto antes de solicitar otro código' });
     }
-
     const code = generateCode();
     const ttlMin = parseInt(process.env.CONTACT_CODE_TTL_MINUTES || '10', 10);
     const expiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
-
     await EmailVerification.create({ email, code, expiresAt });
-
     res.json({ msg: 'Código enviado. Revisa tu correo en unos segundos.' });
-
     console.log(`🔄 Enviando código en background a: ${email}`);
     sendVerificationEmail(email, code, true).then(result => {
       console.log('✅ Email reenvío enviado en background a:', email, '| éxito:', result.success);
     }).catch(err => {
       console.error('❌ Error enviando email reenvío en background:', err.message);
     });
-
   } catch (err) {
     console.error('❌ Error resendVerificationCode:', err && err.message ? err.message : err);
     return res.status(500).json({ msg: 'Error reenviando código' });
   }
 };
 
-// ============================================================
-// VERIFICAR CONTRASEÑA (DEBUG)
-// ============================================================
 const verificarContraseña = async (req, res) => {
   try {
     const { email, password } = req.body;
-
     const usuario = await User.findOne({ email }).select("+password");
-
     if (!usuario) {
       return res.status(404).json({ msg: "Usuario no encontrado" });
     }
-
     const esValida = await bcrypt.compare(password, usuario.password);
-
     res.json({
       contraseñaValida: esValida,
       hashAlmacenado: usuario.password,
       email: usuario.email
     });
-
   } catch (error) {
     res.status(500).json({ msg: "Error en el servidor" });
   }
 };
 
-// ============================================================
-// EXPORTACIÓN DE FUNCIONES
-// ============================================================
 module.exports = {
   registrarUsuario,
   loginUsuario,

@@ -36,13 +36,14 @@ const UsuarioSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    premium: {
+        type: Boolean,
+        default: false
+    },
     createdAt: {
         type: Date,
         default: Date.now
     }
 });
-
-// NOTA: Hemos eliminado completamente el middleware pre-save
-// Todo el hashing se manejará manualmente en los controladores
 
 module.exports = mongoose.model('User', UsuarioSchema);

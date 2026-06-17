@@ -8,12 +8,10 @@ const UbicacionSchema = new mongoose.Schema({
     default: 'Point'
   },
   coordinates: {
-    // [lng, lat]
     type: [Number],
-    // required solo si se provee el campo ubicacion (valida longitud)
     validate: {
       validator: function (v) {
-        if (!v) return true; // permite no tener ubicación
+        if (!v) return true;
         return Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number');
       },
       message: 'Ubicación debe ser un array [lng, lat] de números'
@@ -32,6 +30,7 @@ const MascotaSchema = new mongoose.Schema({
   fotoUrl: { type: String, trim: true },
   fotoPublicId: { type: String, trim: true },
   estado: { type: String, enum: ['perdido', 'encontrado'], default: 'perdido' },
+  destacada: { type: Boolean, default: false },
   usuario: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   ubicacion: {
     type: UbicacionSchema,
@@ -41,5 +40,4 @@ const MascotaSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// Exportamos modelo sin requerir nada más (evita ciclos)
 module.exports = mongoose.model('Mascota', MascotaSchema);

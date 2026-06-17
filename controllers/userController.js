@@ -115,7 +115,6 @@ const registrarUsuario = async (req, res) => {
 
     await EmailVerification.create({ email, code, expiresAt });
 
-    // ✅ CAMBIO: responder inmediatamente, enviar email en segundo plano
     res.status(201).json({
       msg: "Usuario registrado correctamente. Revisa tu correo para el código de verificación.",
       email: email
@@ -165,12 +164,14 @@ const loginUsuario = async (req, res) => {
 
     const token = jwt.sign({ id: usuario._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
+    // ✅ premium incluido en la respuesta
     const usuarioRespuesta = {
       _id: usuario._id,
       nombre: usuario.nombre,
       email: usuario.email,
       createdAt: usuario.createdAt,
-      verified: !!usuario.verified
+      verified: !!usuario.verified,
+      premium: !!usuario.premium
     };
 
     const isProd = process.env.NODE_ENV === 'production';
@@ -398,7 +399,6 @@ const resendVerificationCode = async (req, res) => {
 
     await EmailVerification.create({ email, code, expiresAt });
 
-    // ✅ CAMBIO: responder inmediatamente, enviar email en segundo plano
     res.json({ msg: 'Código enviado. Revisa tu correo en unos segundos.' });
 
     console.log(`🔄 Enviando código en background a: ${email}`);
